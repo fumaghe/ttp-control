@@ -99,6 +99,55 @@ describe('lettura dei membri', () => {
     await expect(gateway.getMember(MEMBER_ID)).resolves.toBeNull();
   });
 
+  it('porta nello snapshot il flag bot e l’hash dell’avatar', async () => {
+    // Sono i due dati da cui dipende il messaggio di benvenuto: averli
+    // dall'enumerazione evita una GET /users per ogni nuovo membro.
+    const routes = {
+      ...baseRoutes(),
+      [`GET /guilds/${GUILD_ID}/members/${MEMBER_ID}`]: {
+        user: { id: MEMBER_ID, username: 'tony', bot: false, avatar: 'a_animato' },
+        nick: 'Tony',
+        roles: ['200000000000000001'],
+      },
+    };
+    const { gateway } = build(routes);
+    const snapshot = await gateway.getMember(MEMBER_ID);
+
+    expect(snapshot?.bot).toBe(false);
+    expect(snapshot?.avatar).toBe('a_animato');
+  });
+
+  it('legge il profilo globale con GET /users/{id}', async () => {
+    // Percorso indispensabile al goodbye: chi ha lasciato la guild non è più
+    // interrogabile con GET /guilds/{id}/members/{id}.
+    const { rest, gateway } = build({
+      ...baseRoutes(),
+      [`GET /users/${MEMBER_ID}`]: { id: MEMBER_ID, username: 'tony', avatar: 'hash', bot: false },
+    });
+
+    const user = await gateway.getUser(MEMBER_ID);
+
+    expect(user?.avatar).toBe('hash');
+    expect(rest.requests.some((r) => r.path === `/users/${MEMBER_ID}`)).toBe(true);
+  });
+
+  it('restituisce null se l’utente non esiste più', async () => {
+    const rest = createDiscordRest({
+      token: 'bot-token',
+      fetchImpl: ((url: string) =>
+        Promise.resolve(
+          url.includes(`/users/${MEMBER_ID}`)
+            ? new Response(JSON.stringify({ code: 10013, message: 'Unknown User' }), {
+                status: 404,
+              })
+            : new Response(JSON.stringify(routeFor(url)), { status: 200 }),
+        )) as unknown as typeof fetch,
+    });
+
+    const gateway = createDiscordRestGateway({ rest, guildId: GUILD_ID, applicationId: APP_ID });
+    await expect(gateway.getUser(MEMBER_ID)).resolves.toBeNull();
+  });
+
   it('riusa le stesse GET dentro una singola invocazione', async () => {
     // Su Workers ogni interaction riparte da zero: senza questa cache un
     // `/setup check` farebbe decine di richieste identiche.

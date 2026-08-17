@@ -5,6 +5,7 @@
  * secret, nemmeno quando è proprio il secret a essere malformato.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { buildChannelRegistry } from '../../src/config/channels.js';
 import { EnvironmentError, loadEnv, resetEnvCache } from '../../src/config/env.js';
 
 /**
@@ -51,6 +52,8 @@ function completeEnv(overrides: Record<string, string | undefined> = {}): NodeJS
     CHANNEL_AUDIT_LOG_ID: '300000000000000005',
     CHANNEL_BLACKLIST_ID: '300000000000000006',
     CHANNEL_CONTROL_PANEL_ID: '300000000000000007',
+    CHANNEL_WELCOME_ID: '300000000000000008',
+    CHANNEL_GOODBYE_ID: '300000000000000009',
   };
 
   // Le chiavi con override `undefined` vengono semplicemente escluse:
@@ -109,6 +112,29 @@ describe('configurazione mancante', () => {
       expect(message).toContain('ROLE_TTP_ID');
       expect(message).toContain('CHANNEL_VERIFY_ID');
     }
+  });
+});
+
+describe('canali di benvenuto e addio', () => {
+  it('sono obbligatori come ogni altro canale', () => {
+    expect(() => loadEnv(completeEnv({ CHANNEL_WELCOME_ID: undefined }))).toThrow(EnvironmentError);
+    resetEnvCache();
+    expect(() => loadEnv(completeEnv({ CHANNEL_GOODBYE_ID: undefined }))).toThrow(EnvironmentError);
+  });
+
+  it('finiscono nel registry, quindi anche nei controlli di `/setup check`', () => {
+    const env = loadEnv(completeEnv());
+    const channels = buildChannelRegistry(env);
+
+    expect(channels.welcome).toBe('300000000000000008');
+    expect(channels.goodbye).toBe('300000000000000009');
+
+    // `/setup check` itera esattamente su `all`: esserci significa essere
+    // verificati per esistenza e permessi (View / Send / Embed Links).
+    const keys = channels.all.map((descriptor) => descriptor.key);
+    expect(keys).toContain('welcome');
+    expect(keys).toContain('goodbye');
+    expect(channels.all.filter((d) => d.key === 'welcome' || d.key === 'goodbye')).toHaveLength(2);
   });
 });
 

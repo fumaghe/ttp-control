@@ -82,5 +82,10 @@
     "CHANNEL_AUDIT_LOG_ID": "1538934747676545054",
     "CHANNEL_BLACKLIST_ID": "1538893121084203008",
     "CHANNEL_CONTROL_PANEL_ID": "1538934817025167381",
+
+    // Messaggi automatici del ciclo di vita del membro (cron di
+    // riconciliazione). Sostituire con gli ID reali dei due canali.
+    "CHANNEL_WELCOME_ID": "<channel-welcome-id>",
+    "CHANNEL_GOODBYE_ID": "<channel-goodbye-id>",
   },
 }
