@@ -126,7 +126,17 @@ describe('bottoni sopravvissuti al redeploy', () => {
       blacklisted: 0,
       permadeath: 0,
       left: 0,
-      byRank: { RESIDENT: 1, GANGSTER: 1, YOUNG_OG: 1, BIG: 0, OG: 0 },
+      byRank: {
+        RESIDENT: 1,
+        GANG_BANGER: 0,
+        INFANTIL_LOC: 0,
+        TINY_LOC: 1,
+        LOC: 0,
+        ORIGINAL_TINY_LOC: 1,
+        BIG: 0,
+        BIG_HOMIE: 0,
+        OG: 0,
+      },
     });
 
     const rows = (payload.components ?? []).map((row) => ('toJSON' in row ? row.toJSON() : row));

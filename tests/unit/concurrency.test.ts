@@ -19,9 +19,22 @@ import {
 const USER = '900000000000000001';
 const OG = '900000000000000010';
 
+/** Tutti e nove i ruoli della gerarchia. */
+const ALL_RANK_ROLE_IDS = [
+  ROLE_IDS.resident,
+  ROLE_IDS.gangBanger,
+  ROLE_IDS.infantilLoc,
+  ROLE_IDS.tinyLoc,
+  ROLE_IDS.loc,
+  ROLE_IDS.originalTinyLoc,
+  ROLE_IDS.big,
+  ROLE_IDS.bigHomie,
+  ROLE_IDS.og,
+];
+
 let h: Harness;
 
-async function joined(rank: MemberRank = MemberRank.GANGSTER): Promise<void> {
+async function joined(rank: MemberRank = MemberRank.TINY_LOC): Promise<void> {
   addFakeMember(h.guild, USER, { position: 1 });
   await verifyUser(h, USER);
   await h.members.addToGang({
@@ -94,7 +107,7 @@ describe('KeyedMutex', () => {
 
 describe('promote concorrenti', () => {
   it('due promote simultanei avanzano di UN solo livello', async () => {
-    await joined(MemberRank.GANGSTER);
+    await joined(MemberRank.TINY_LOC);
 
     await Promise.allSettled([
       h.members.promote({ discordId: USER, actorDiscordId: OG, reason: 'A' }),
@@ -102,8 +115,9 @@ describe('promote concorrenti', () => {
     ]);
 
     const member = await h.members.find(USER);
-    // Gangster → Young OG, e NON fino a Big.
-    expect(member?.rank).toBe(MemberRank.YOUNG_OG);
+    // Tiny Loc → Loc, di UN gradino. NON deve comporsi in Tiny Loc → Loc →
+    // Original Tiny Loc: è esattamente il caso che il locking impedisce.
+    expect(member?.rank).toBe(MemberRank.LOC);
   });
 
   it('lascia comunque esattamente un rank su Discord', async () => {
@@ -116,19 +130,13 @@ describe('promote concorrenti', () => {
     ]);
 
     const roles = h.guild.members.get(USER)?.roles;
-    const rankRoles = [
-      ROLE_IDS.resident,
-      ROLE_IDS.gangster,
-      ROLE_IDS.youngOg,
-      ROLE_IDS.big,
-      ROLE_IDS.og,
-    ].filter((id) => roles?.has(id));
+    const rankRoles = ALL_RANK_ROLE_IDS.filter((id) => roles?.has(id));
 
     expect(rankRoles).toHaveLength(1);
   });
 
   it('il locking ottimistico rifiuta una modifica su stato obsoleto', async () => {
-    await joined(MemberRank.GANGSTER);
+    await joined(MemberRank.TINY_LOC);
     const stale = await h.members.find(USER);
     if (!stale) throw new Error('membro non trovato');
 
@@ -183,7 +191,7 @@ describe('operazioni di stato concorrenti', () => {
 
 describe('compensazione dopo un errore Discord', () => {
   it('un promote fallito su Discord non lascia il database avanti', async () => {
-    await joined(MemberRank.GANGSTER);
+    await joined(MemberRank.TINY_LOC);
     const before = await h.members.find(USER);
 
     // Da qui in poi ogni chiamata a Discord fallisce.

@@ -269,12 +269,10 @@ describe('routing dei modal', () => {
     addFakeMember(test.harness.guild, TEST_ACTOR_ID);
 
     const result = await dispatch(
+      // Il form di verifica è quello semplificato: nome IC + nome OOC.
       modalInteraction('verify:submit', {
-        rpName: 'Tony',
-        rpSurname: 'Montana',
-        citizenId: '8712',
-        phone: '555-1234',
-        referral: 'Conosciuto in strada',
+        rpName: 'Tony Montana',
+        oocName: 'Andrea',
       }),
       test,
     );
@@ -282,7 +280,7 @@ describe('routing dei modal', () => {
     expect(textOf(result)).toContain('VERIFICA COMPLETATA');
 
     const verification = await test.harness.repos.verifications.findActive(TEST_ACTOR_ID);
-    expect(verification?.rpName).toBe('Tony');
+    expect(verification?.rpName).toBe('Tony Montana');
 
     // Verified sì, TTP no: è l'invariante centrale del progetto.
     const member = test.harness.guild.members.get(TEST_ACTOR_ID);

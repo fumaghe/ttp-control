@@ -8,7 +8,25 @@
  */
 import { MemberRank, SpecialRole } from '../generated/prisma/enums.js';
 import { type Env } from './env.js';
-import { RANK_ORDER } from './constants.js';
+import { RANK_LABEL, RANK_ORDER } from './constants.js';
+
+/**
+ * Chiave stabile del descrittore per ogni rank.
+ *
+ * Serve solo alla diagnostica di `/setup check`: e' il nome con cui il ruolo
+ * compare nei report, e coincide con la chiave usata in `env.roles`.
+ */
+const RANK_ROLE_KEY: Readonly<Record<MemberRank, string>> = {
+  [MemberRank.RESIDENT]: 'resident',
+  [MemberRank.GANG_BANGER]: 'gangBanger',
+  [MemberRank.INFANTIL_LOC]: 'infantilLoc',
+  [MemberRank.TINY_LOC]: 'tinyLoc',
+  [MemberRank.LOC]: 'loc',
+  [MemberRank.ORIGINAL_TINY_LOC]: 'originalTinyLoc',
+  [MemberRank.BIG]: 'big',
+  [MemberRank.BIG_HOMIE]: 'bigHomie',
+  [MemberRank.OG]: 'og',
+};
 
 export type RoleDimension =
   'membership' | 'rank' | 'community' | 'status' | 'badge' | 'specialization';
@@ -54,11 +72,17 @@ export interface RoleRegistry {
 export function buildRoleRegistry(env: Env): RoleRegistry {
   const r = env.roles;
 
+  // Un membro TTP ha ESATTAMENTE UNO di questi ruoli: e' l'invariante che
+  // `RoleService.setHierarchyRank` garantisce a ogni cambio di rank.
   const rank: Record<MemberRank, string> = {
     [MemberRank.RESIDENT]: r.resident,
-    [MemberRank.GANGSTER]: r.gangster,
-    [MemberRank.YOUNG_OG]: r.youngOg,
+    [MemberRank.GANG_BANGER]: r.gangBanger,
+    [MemberRank.INFANTIL_LOC]: r.infantilLoc,
+    [MemberRank.TINY_LOC]: r.tinyLoc,
+    [MemberRank.LOC]: r.loc,
+    [MemberRank.ORIGINAL_TINY_LOC]: r.originalTinyLoc,
     [MemberRank.BIG]: r.big,
+    [MemberRank.BIG_HOMIE]: r.bigHomie,
     [MemberRank.OG]: r.og,
   };
 
@@ -75,11 +99,15 @@ export function buildRoleRegistry(env: Env): RoleRegistry {
     { key: 'verified', id: r.verified, label: '✅ Verified', dimension: 'membership' },
     { key: 'ttp', id: r.ttp, label: '🩸 TTP', dimension: 'membership' },
 
-    { key: 'resident', id: r.resident, label: '🏠 Resident', dimension: 'rank' },
-    { key: 'gangster', id: r.gangster, label: '🥷 Gangster', dimension: 'rank' },
-    { key: 'youngOg', id: r.youngOg, label: '🩸 Young OG', dimension: 'rank' },
-    { key: 'big', id: r.big, label: '💎 Big', dimension: 'rank' },
-    { key: 'og', id: r.og, label: '👑 OG', dimension: 'rank' },
+    // Gerarchia, dall'alto verso il basso. Derivata da RANK_ORDER invece che
+    // riscritta a mano: aggiungere un rank alla gerarchia lo fa comparire in
+    // automatico anche nei controlli di `/setup check`.
+    ...[...RANK_ORDER].reverse().map((name): RoleDescriptor => ({
+      key: RANK_ROLE_KEY[name],
+      id: rank[name],
+      label: RANK_LABEL[name],
+      dimension: 'rank',
+    })),
 
     { key: 'friend', id: r.friend, label: '🤝 Friend', dimension: 'community' },
     { key: 'mafia', id: r.mafia, label: '🕴 Mafia', dimension: 'community' },

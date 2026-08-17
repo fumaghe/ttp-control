@@ -11,9 +11,13 @@ import type {
 function emptyRankTally(): Record<MemberRank, number> {
   return {
     [MemberRank.RESIDENT]: 0,
-    [MemberRank.GANGSTER]: 0,
-    [MemberRank.YOUNG_OG]: 0,
+    [MemberRank.GANG_BANGER]: 0,
+    [MemberRank.INFANTIL_LOC]: 0,
+    [MemberRank.TINY_LOC]: 0,
+    [MemberRank.LOC]: 0,
+    [MemberRank.ORIGINAL_TINY_LOC]: 0,
     [MemberRank.BIG]: 0,
+    [MemberRank.BIG_HOMIE]: 0,
     [MemberRank.OG]: 0,
   };
 }

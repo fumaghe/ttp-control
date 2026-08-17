@@ -27,6 +27,7 @@ import { createMemberLifecycleMessageService } from '../services/memberLifecycle
 import { createMemberReconciliationService } from '../services/memberReconciliationService.js';
 import { createMemberService } from '../services/memberService.js';
 import { createPanelService } from '../services/panelService.js';
+import { createRankAnnouncementService } from '../services/rankAnnouncementService.js';
 import { createRoleService } from '../services/roleService.js';
 import { createStatsService } from '../services/statsService.js';
 import { createTtpApplicationService } from '../services/ttpApplicationService.js';
@@ -95,12 +96,21 @@ export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
 
   const verification = createVerificationService({ repos, roles: roleService, gateway, audit });
 
+  // Put On / Put Off: annunci pubblici dei cambi di rank. Agganciato a
+  // MemberService e non ai command handler, cosi' slash command, bottoni della
+  // member card e control panel producono tutti lo stesso annuncio.
+  const rankAnnouncements = createRankAnnouncementService({
+    messages: gateway,
+    channelId: channels.putOnOff,
+  });
+
   const members = createMemberService({
     repos,
     roles: roleService,
     roleRegistry: roles,
     gateway,
     audit,
+    announcements: rankAnnouncements,
     guildId: env.guildId,
   });
 

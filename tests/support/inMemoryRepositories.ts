@@ -14,6 +14,7 @@ import {
   type PanelType,
   type SpecialRole,
 } from '../../src/generated/prisma/enums.js';
+import { RANK_ORDER } from '../../src/config/constants.js';
 import type {
   AuditLog,
   BlacklistEntry,
@@ -310,13 +311,12 @@ export function createInMemoryRepositories(store: InMemoryStore): Repositories {
           inactive: byStatus(MemberStatus.INACTIVE),
           permadeath: byStatus(MemberStatus.PERMADEATH),
           left: byStatus(MemberStatus.LEFT),
-          byRank: {
-            RESIDENT: byRank.RESIDENT ?? 0,
-            GANGSTER: byRank.GANGSTER ?? 0,
-            YOUNG_OG: byRank.YOUNG_OG ?? 0,
-            BIG: byRank.BIG ?? 0,
-            OG: byRank.OG ?? 0,
-          },
+          // Derivato da RANK_ORDER invece che elencato a mano: la gerarchia
+          // ha una sola definizione autorevole, e questa fixture la segue.
+          byRank: Object.fromEntries(RANK_ORDER.map((rank) => [rank, byRank[rank] ?? 0])) as Record<
+            MemberRank,
+            number
+          >,
         };
       },
       async countByStatus(status): Promise<number> {

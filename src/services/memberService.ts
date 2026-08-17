@@ -16,6 +16,15 @@
  * Cosi' il caso peggiore e' "nessuna modifica" invece di "database e Discord
  * che raccontano cose diverse". Se anche la compensazione fallisce lo si
  * registra come ROLE_SYNC_WARNING: `/system sync-check` lo fara' emergere.
+ *
+ * L'ordine completo di un cambio di rank e' quindi:
+ *
+ *   validazione → DB → Discord → compensazione → MemberHistory → Audit
+ *   → annuncio Put On/Put Off (best-effort)
+ *
+ * L'annuncio pubblico e' ultimo perche' e' l'unico passo non autorevole: se
+ * fallisce si logga e basta, senza rollback, senza ritentativi e senza
+ * toccare `Member.version`.
  */
 import {
   AuditAction,
@@ -31,6 +40,7 @@ import { lockKey, memberMutex } from '../utils/mutex.js';
 import { createLogger } from '../utils/logger.js';
 import type { RoleRegistry } from '../config/roles.js';
 import type { AuditService } from './auditService.js';
+import type { RankAnnouncementService } from './rankAnnouncementService.js';
 import type { RoleService } from './roleService.js';
 import type { GuildMemberSnapshot, RoleGateway } from './roleGateway.js';
 
@@ -163,9 +173,16 @@ export function createMemberService(deps: {
   roleRegistry: RoleRegistry;
   gateway: RoleGateway;
   audit: AuditService;
+  /**
+   * Annunci pubblici Put On / Put Off. Volutamente NON opzionale: e' un
+   * effetto della mutazione di rank, non una decorazione del chiamante, e
+   * renderlo obbligatorio fa fallire il typecheck se un giorno qualcuno
+   * costruisce il service dimenticandolo.
+   */
+  announcements: RankAnnouncementService;
   guildId: string;
 }): MemberService {
-  const { repos, roles, roleRegistry, gateway, audit, guildId } = deps;
+  const { repos, roles, roleRegistry, gateway, audit, announcements, guildId } = deps;
 
   /** Snapshot Discord obbligatorio: il bersaglio deve essere nel server. */
   async function requireSnapshot(discordId: string): Promise<GuildMemberSnapshot> {
@@ -314,6 +331,31 @@ export function createMemberService(deps: {
         },
         ['audit', 'member'],
       );
+
+      // --- 4. Annuncio pubblico Put On / Put Off ---------------------------
+      // ULTIMO PASSO, E BEST-EFFORT. Arriva qui e non prima perche' e' l'unica
+      // parte non autorevole dell'operazione: database, ruoli Discord,
+      // storico e audit sono gia' scritti e non vengono piu' rimessi in
+      // discussione. Il service non lancia per contratto; il `catch` e' la
+      // cintura di sicurezza se un giorno cambiasse idea.
+      //
+      // La direzione la calcola il service da RANK_ORDER: qui non si
+      // confrontano stringhe, e `promote`/`demote`/`setRank` producono lo
+      // stesso annuncio perche' passano tutti da questo punto.
+      await announcements
+        .announceRankChange({
+          memberDiscordId: member.discordId,
+          actorDiscordId: input.actorDiscordId,
+          fromRank,
+          toRank,
+          reason: input.reason,
+        })
+        .catch((error: unknown) => {
+          log.error(
+            { err: error, discordId: member.discordId, fromRank, toRank },
+            'Annuncio Put On/Put Off fallito: il cambio di rank resta valido',
+          );
+        });
 
       return { member: updated, fromRank, toRank };
     });

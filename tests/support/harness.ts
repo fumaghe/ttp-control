@@ -13,7 +13,12 @@ import { createBlacklistService } from '../../src/services/blacklistService.js';
 import { createCommunityService } from '../../src/services/communityService.js';
 import { createConsistencyService } from '../../src/services/consistencyService.js';
 import { createMemberService } from '../../src/services/memberService.js';
+import {
+  createRankAnnouncementService,
+  type RankAnnouncementGateway,
+} from '../../src/services/rankAnnouncementService.js';
 import { createRoleService } from '../../src/services/roleService.js';
+import type { MessagePayload } from '../../src/discord/payload.js';
 import { createTtpApplicationService } from '../../src/services/ttpApplicationService.js';
 import {
   createVerificationService,
@@ -34,11 +39,18 @@ export const OWNER_ID = '100000000000000002';
 export const ROLE_IDS = {
   verified: '200000000000000001',
   ttp: '200000000000000002',
+
+  // Gerarchia, dal piu' alto al piu' basso.
   og: '200000000000000003',
-  big: '200000000000000004',
-  youngOg: '200000000000000005',
-  gangster: '200000000000000006',
+  bigHomie: '200000000000000004',
+  big: '200000000000000019',
+  originalTinyLoc: '200000000000000005',
+  loc: '200000000000000020',
+  tinyLoc: '200000000000000006',
+  infantilLoc: '200000000000000021',
+  gangBanger: '200000000000000022',
   resident: '200000000000000007',
+
   friend: '200000000000000008',
   mafia: '200000000000000009',
   banned: '200000000000000010',
@@ -62,6 +74,7 @@ export const CHANNEL_IDS = {
   controlPanel: '300000000000000007',
   welcome: '300000000000000008',
   goodbye: '300000000000000009',
+  putOnOff: '300000000000000010',
 } as const;
 
 export function testEnv(): Env {
@@ -98,16 +111,45 @@ export interface FakeMember {
   avatar: string | null;
 }
 
+/** Messaggio pubblicato su un canale dal bot. */
+export interface SentMessage {
+  channelId: string;
+  payload: MessagePayload;
+}
+
 export interface FakeGuild {
   members: Map<string, FakeMember>;
   /** Ruoli che il bot NON può gestire: simula un problema di gerarchia. */
   unmanageableRoles: Set<string>;
   /** DM ricevuti, per verificare le notifiche. */
   notifications: { discordId: string; title: string }[];
+  /** Messaggi pubblicati sui canali: usati per verificare Put On / Put Off. */
+  messages: SentMessage[];
+  /** Se `true`, ogni `sendMessage` fallisce: simula un canale irraggiungibile. */
+  failMessages: boolean;
 }
 
 export function createFakeGuild(): FakeGuild {
-  return { members: new Map(), unmanageableRoles: new Set(), notifications: [] };
+  return {
+    members: new Map(),
+    unmanageableRoles: new Set(),
+    notifications: [],
+    messages: [],
+    failMessages: false,
+  };
+}
+
+/** Gateway dei messaggi: registra ciò che il bot pubblica, senza rete. */
+export function createFakeMessageGateway(guild: FakeGuild): RankAnnouncementGateway {
+  return {
+    async sendMessage(channelId: string, payload: MessagePayload): Promise<string> {
+      if (guild.failMessages) {
+        throw new Error('Canale non raggiungibile (simulato)');
+      }
+      guild.messages.push({ channelId, payload });
+      return `msg-${String(guild.messages.length)}`;
+    },
+  };
 }
 
 export function addFakeMember(
@@ -208,6 +250,7 @@ export interface Harness {
   guild: FakeGuild;
   gateway: ReturnType<typeof createFakeGateway>;
   audit: AuditService;
+  announcements: ReturnType<typeof createRankAnnouncementService>;
   roleService: ReturnType<typeof createRoleService>;
   authorization: ReturnType<typeof createAuthorizationService>;
   verification: ReturnType<typeof createVerificationService>;
@@ -240,12 +283,18 @@ export function createHarness(): Harness {
 
   const verification = createVerificationService({ repos, roles: roleService, gateway, audit });
 
+  const announcements = createRankAnnouncementService({
+    messages: createFakeMessageGateway(guild),
+    channelId: CHANNEL_IDS.putOnOff,
+  });
+
   const members = createMemberService({
     repos,
     roles: roleService,
     roleRegistry: roles,
     gateway,
     audit,
+    announcements,
     guildId: GUILD_ID,
   });
 
@@ -297,6 +346,7 @@ export function createHarness(): Harness {
     guild,
     gateway,
     audit,
+    announcements,
     roleService,
     authorization,
     verification,

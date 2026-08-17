@@ -13,17 +13,22 @@ export const BOT_VERSION = '1.0.0';
 export const GANG_NAME = 'TTP — Impero';
 
 /**
- * Gerarchia TTP in ordine crescente.
+ * Gerarchia TTP in ordine crescente, dal rank piu' basso al piu' alto.
  *
  * `promote` avanza di una posizione, `demote` retrocede di una.
  * L'ordine di questo array e' l'unica fonte di verita' sulla gerarchia:
- * non duplicarlo altrove.
+ * non duplicarlo altrove. Chi deve confrontare due rank usa `compareRanks`,
+ * mai un confronto fra stringhe.
  */
 export const RANK_ORDER = [
   MemberRank.RESIDENT,
-  MemberRank.GANGSTER,
-  MemberRank.YOUNG_OG,
+  MemberRank.GANG_BANGER,
+  MemberRank.INFANTIL_LOC,
+  MemberRank.TINY_LOC,
+  MemberRank.LOC,
+  MemberRank.ORIGINAL_TINY_LOC,
   MemberRank.BIG,
+  MemberRank.BIG_HOMIE,
   MemberRank.OG,
 ] as const;
 
@@ -33,9 +38,13 @@ export const DEFAULT_INITIAL_RANK: MemberRank = MemberRank.RESIDENT;
 /** Etichette con emoji, per gli embed. */
 export const RANK_LABEL: Readonly<Record<MemberRank, string>> = {
   [MemberRank.RESIDENT]: '🏠 Resident',
-  [MemberRank.GANGSTER]: '🥷 Gangster',
-  [MemberRank.YOUNG_OG]: '🩸 Young OG',
-  [MemberRank.BIG]: '💎 Big',
+  [MemberRank.GANG_BANGER]: '👀 Gang Banger',
+  [MemberRank.INFANTIL_LOC]: '🌱 Infantil Loc',
+  [MemberRank.TINY_LOC]: '🏷️ Tiny Loc',
+  [MemberRank.LOC]: '🧢 Loc',
+  [MemberRank.ORIGINAL_TINY_LOC]: '🥷 Original Tiny Loc',
+  [MemberRank.BIG]: '🔥 Big',
+  [MemberRank.BIG_HOMIE]: '💎 Big Homie',
   [MemberRank.OG]: '👑 OG',
 };
 

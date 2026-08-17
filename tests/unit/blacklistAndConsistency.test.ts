@@ -215,7 +215,7 @@ describe('controllo di integrità', () => {
 
   it('rileva due rank contemporaneamente', async () => {
     addFakeMember(h.guild, USER, {
-      roles: [ROLE_IDS.verified, ROLE_IDS.ttp, ROLE_IDS.gangster, ROLE_IDS.youngOg],
+      roles: [ROLE_IDS.verified, ROLE_IDS.ttp, ROLE_IDS.tinyLoc, ROLE_IDS.originalTinyLoc],
     });
     h.guild.members.delete(OG);
 
@@ -226,7 +226,7 @@ describe('controllo di integrità', () => {
   });
 
   it('rileva un rank senza TTP', async () => {
-    addFakeMember(h.guild, USER, { roles: [ROLE_IDS.verified, ROLE_IDS.big] });
+    addFakeMember(h.guild, USER, { roles: [ROLE_IDS.verified, ROLE_IDS.bigHomie] });
     h.guild.members.delete(OG);
 
     const report = await h.consistency.run();
@@ -267,7 +267,7 @@ describe('controllo di integrità', () => {
     });
     const member = h.guild.members.get(USER);
     member?.roles.delete(ROLE_IDS.resident);
-    member?.roles.add(ROLE_IDS.big);
+    member?.roles.add(ROLE_IDS.bigHomie);
     h.guild.members.delete(OG);
 
     const report = await h.consistency.run();

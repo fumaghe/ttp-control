@@ -38,17 +38,27 @@ export type Operation = (typeof OPERATIONS)[number];
 /**
  * Policy configurabili per-guild (persistite in `GuildConfig`).
  * I default sono la lettura piu' restrittiva della matrice del master prompt.
+ *
+ * NOMI LEGACY, SIGNIFICATO AGGIORNATO. Questi campi sono colonne di
+ * `GuildConfig` e conservano il nome che avevano con la gerarchia a cinque
+ * rank, per non richiedere una migration puramente cosmetica:
+ *
+ *   `big*`     -> si applica a **BIG_HOMIE** (l'ex `BIG`)
+ *   `youngOg*` -> si applica a **ORIGINAL_TINY_LOC** (l'ex `YOUNG_OG`)
+ *
+ * Il rank `BIG` della nuova gerarchia e' un rank NUOVO, non e' Leadership e
+ * non e' toccato da nessuna di queste policy.
  */
 export interface PermissionPolicy {
-  /** Big puo' amministrare un altro Big. Default: no. */
+  /** Big Homie puo' amministrare un altro Big Homie. Default: no. */
   readonly bigCanManageBig: boolean;
-  /** Big puo' portare qualcuno al rank BIG o OG. Default: no. */
+  /** Big Homie puo' portare qualcuno a BIG_HOMIE o OG. Default: no. */
   readonly bigCanPromoteToLeadership: boolean;
-  /** Big puo' gestire la blacklist. Default: si. */
+  /** Big Homie puo' gestire la blacklist. Default: si. */
   readonly bigCanBlacklist: boolean;
-  /** Big puo' aprire il control panel. Default: si. */
+  /** Big Homie puo' aprire il control panel. Default: si. */
   readonly bigCanUseControlPanel: boolean;
-  /** Young OG puo' revisionare le candidature TTP. Default: no. */
+  /** Original Tiny Loc puo' revisionare le candidature TTP. Default: no. */
   readonly youngOgCanReviewApplications: boolean;
 }
 
@@ -104,10 +114,10 @@ const OG_ONLY_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
 ]);
 
 /**
- * Operazioni che un Big puo' eseguire, oltre a quelle read-only,
+ * Operazioni che un Big Homie puo' eseguire, oltre a quelle read-only,
  * indipendentemente dalla policy.
  */
-const BIG_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
+const BIG_HOMIE_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
   'member.notes.view',
   'application.review',
   'member.add',
@@ -120,9 +130,16 @@ const BIG_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
   'community.manage',
 ]);
 
-/** Il rank e' considerato Leadership. */
+/**
+ * Il rank e' considerato Leadership.
+ *
+ * Sono ESATTAMENTE i due rank che lo erano con la gerarchia a cinque livelli:
+ * `OG` e l'ex `BIG`, che oggi si chiama `BIG_HOMIE`. Il nuovo rank `BIG`, che
+ * sta piu' in basso, NON e' Leadership: ha lo stesso nome del vecchio ma un
+ * altro ruolo Discord e un altro significato.
+ */
 export function isLeadershipRank(rank: MemberRank | undefined): boolean {
-  return rank === MemberRank.OG || rank === MemberRank.BIG;
+  return rank === MemberRank.OG || rank === MemberRank.BIG_HOMIE;
 }
 
 /**
@@ -144,36 +161,53 @@ export function can(
     case MemberRank.OG:
       return ALLOW;
 
-    case MemberRank.BIG: {
+    // Ex `BIG` della gerarchia a cinque rank: eredita esattamente le sue
+    // capacita', ne' una in piu'.
+    case MemberRank.BIG_HOMIE: {
       if (OG_ONLY_OPERATIONS.has(operation)) {
         return deny(`L'operazione \`${operation}\` e' riservata agli OG.`);
       }
       if (operation === 'blacklist.manage') {
         return policy.bigCanBlacklist
           ? ALLOW
-          : deny('La policy della gang non consente ai Big di gestire la blacklist.');
+          : deny('La policy della gang non consente ai Big Homie di gestire la blacklist.');
       }
       if (operation === 'panel.use') {
         return policy.bigCanUseControlPanel
           ? ALLOW
-          : deny('La policy della gang non consente ai Big di usare il control panel.');
+          : deny('La policy della gang non consente ai Big Homie di usare il control panel.');
       }
-      return BIG_OPERATIONS.has(operation)
+      return BIG_HOMIE_OPERATIONS.has(operation)
         ? ALLOW
-        : deny(`L'operazione \`${operation}\` non e' consentita ai Big.`);
+        : deny(`L'operazione \`${operation}\` non e' consentita ai Big Homie.`);
     }
 
-    case MemberRank.YOUNG_OG: {
+    // Ex `YOUNG_OG`: eredita esattamente le sue capacita'.
+    case MemberRank.ORIGINAL_TINY_LOC: {
       if (operation === 'member.notes.view') return ALLOW;
       if (operation === 'application.review') {
         return policy.youngOgCanReviewApplications
           ? ALLOW
-          : deny('La policy della gang non consente agli Young OG di revisionare le candidature.');
+          : deny(
+              'La policy della gang non consente agli Original Tiny Loc di revisionare le candidature.',
+            );
       }
-      return deny(`L'operazione \`${operation}\` richiede almeno il rank Big.`);
+      return deny(`L'operazione \`${operation}\` richiede almeno il rank Big Homie.`);
     }
 
-    case MemberRank.GANGSTER:
+    // Tutti gli altri rank non amministrano nulla.
+    //
+    // Qui dentro c'e' anche il NUOVO `BIG`: sta piu' in alto di
+    // ORIGINAL_TINY_LOC nella gerarchia, ma la gerarchia ordina i rank, non
+    // distribuisce privilegi. Il vecchio `BIG` amministrativo e' diventato
+    // `BIG_HOMIE`, e i rank introdotti con la nuova scala non ereditano
+    // permessi solo perche' sono nuovi o perche' ne riusano il nome: chi
+    // vuole dargliene deve aggiungerli qui esplicitamente.
+    case MemberRank.BIG:
+    case MemberRank.LOC:
+    case MemberRank.TINY_LOC:
+    case MemberRank.INFANTIL_LOC:
+    case MemberRank.GANG_BANGER:
     case MemberRank.RESIDENT:
     case undefined:
       return deny('Non hai i permessi necessari per questa operazione.');
@@ -224,18 +258,18 @@ export function canActOn(
       return deny('Non puoi eseguire questa operazione su te stesso.');
     }
 
-    // Big non amministra OG, mai.
-    if (actor.rank === MemberRank.BIG && target.rank === MemberRank.OG) {
-      return deny('Un Big non puo’ amministrare un OG.');
+    // Big Homie non amministra OG, mai.
+    if (actor.rank === MemberRank.BIG_HOMIE && target.rank === MemberRank.OG) {
+      return deny('Un Big Homie non puo’ amministrare un OG.');
     }
 
-    // Big non amministra un altro Big, salvo policy esplicita.
+    // Big Homie non amministra un altro Big Homie, salvo policy esplicita.
     if (
-      actor.rank === MemberRank.BIG &&
-      target.rank === MemberRank.BIG &&
+      actor.rank === MemberRank.BIG_HOMIE &&
+      target.rank === MemberRank.BIG_HOMIE &&
       !policy.bigCanManageBig
     ) {
-      return deny('Un Big non puo’ amministrare un altro Big con la policy attuale.');
+      return deny('Un Big Homie non puo’ amministrare un altro Big Homie con la policy attuale.');
     }
 
     // Nessuno puo' amministrare un rank superiore al proprio.
@@ -261,8 +295,10 @@ export function canActOn(
 /**
  * Puo' l'attore portare un membro esattamente a `targetRank`?
  *
- * Vale per promote, demote e cambio rank diretto: un Big non deve poter creare
- * altri Big o OG a meno che la policy non lo consenta esplicitamente.
+ * Vale per promote, demote e cambio rank diretto: un Big Homie non deve poter
+ * creare altri Big Homie o OG a meno che la policy non lo consenta
+ * esplicitamente. Il nuovo rank `BIG` non e' Leadership, quindi resta
+ * assegnabile da un Big Homie come ogni altro rank sotto di lui.
  */
 export function canAssignRank(
   actor: ActorContext,
@@ -271,9 +307,11 @@ export function canAssignRank(
 ): AuthorizationDecision {
   if (actor.isBotOwner || actor.rank === MemberRank.OG) return ALLOW;
 
-  if (actor.rank === MemberRank.BIG) {
+  if (actor.rank === MemberRank.BIG_HOMIE) {
     if (isLeadershipRank(targetRank) && !policy.bigCanPromoteToLeadership) {
-      return deny('Un Big non puo’ assegnare il rank Big o OG con la policy attuale: serve un OG.');
+      return deny(
+        'Un Big Homie non puo’ assegnare il rank Big Homie o OG con la policy attuale: serve un OG.',
+      );
     }
     return ALLOW;
   }

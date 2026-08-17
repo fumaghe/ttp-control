@@ -49,9 +49,9 @@ describe('verifica valida', () => {
     // Nemmeno un rank della gerarchia deve comparire.
     for (const rankRole of [
       ROLE_IDS.resident,
-      ROLE_IDS.gangster,
-      ROLE_IDS.youngOg,
-      ROLE_IDS.big,
+      ROLE_IDS.tinyLoc,
+      ROLE_IDS.originalTinyLoc,
+      ROLE_IDS.bigHomie,
       ROLE_IDS.og,
     ]) {
       expect(roles?.has(rankRole)).toBe(false);
@@ -73,7 +73,7 @@ describe('verifica valida', () => {
 
     const record = await h.repos.verifications.findActive(USER);
     expect(record).not.toBeNull();
-    expect(record?.rpName).toBe('Tony');
+    expect(record?.rpName).toBe('Tony Montana');
 
     expect(h.store.audit.some((entry) => entry.action === AuditAction.USER_VERIFIED)).toBe(true);
   });

@@ -55,6 +55,50 @@ Invarianti applicate dal sistema:
 
 ---
 
+## La gerarchia
+
+Nove rank, dal più basso al più alto. `/member promote` e `/member demote` si
+muovono di **un solo gradino** alla volta.
+
+```text
+👑 OG
+💎 Big Homie
+🔥 Big
+🥷 Original Tiny Loc
+🧢 Loc
+🏷️ Tiny Loc
+🌱 Infantil Loc
+👀 Gang Banger
+🏠 Resident          ← rank iniziale di ogni nuovo membro
+```
+
+L'ordine ha **una sola definizione autorevole**: `RANK_ORDER` in
+`src/config/constants.ts`. Etichette, choices dei comandi, ordinamento del
+roster, registry dei ruoli e conteggi del control panel derivano tutti da lì.
+Nel codice due rank non si confrontano **mai** come stringhe — si usa
+`compareRanks`, perché in ordine alfabetico `Loc` verrebbe prima di
+`Tiny Loc`, cioè l'esatto contrario della gerarchia.
+
+### Nota per chi arriva dalla gerarchia a cinque rank
+
+Alcuni ruoli Discord sono stati **riutilizzati**, quindi i rank sono stati
+rinominati, non ricreati:
+
+| Prima | Adesso | Ruolo Discord |
+| --- | --- | --- |
+| `RESIDENT` | `RESIDENT` | invariato |
+| `GANGSTER` | `TINY_LOC` | lo stesso, rinominato |
+| `YOUNG_OG` | `ORIGINAL_TINY_LOC` | lo stesso, rinominato |
+| `BIG` | `BIG_HOMIE` | lo stesso, rinominato |
+| `OG` | `OG` | invariato |
+
+**Il `Big` di oggi non è il `Big` di ieri.** È un rank nuovo, in mezzo alla
+scala, con un ruolo Discord nuovo (`ROLE_BIG_ID`) — e senza nessuno dei
+permessi amministrativi che il vecchio `Big` aveva: quelli sono andati a
+`Big Homie`. Vedi [Permission matrix](#permission-matrix).
+
+---
+
 ## Architettura
 
 ```text
@@ -400,19 +444,19 @@ un canale pubblico.
 | `/setup verify-panel` | Pubblica (o aggiorna) il pannello di verifica | OG |
 | `/setup control-panel` | Pubblica (o aggiorna) il control panel | OG |
 | `/member info` | Scheda del membro con azioni rapide | tutti |
-| `/member add` | Ingresso manuale nella gang | Big |
-| `/member promote` | Rank successivo | Big |
-| `/member demote` | Rank precedente | Big |
-| `/member rank` | Cambio rank diretto | Big |
-| `/member roles` | Badge e specializzazioni | Big |
+| `/member add` | Ingresso manuale nella gang | Big Homie |
+| `/member promote` | Rank successivo, **un gradino alla volta** → Put On | Big Homie |
+| `/member demote` | Rank precedente, un gradino alla volta → Put Off | Big Homie |
+| `/member rank` | Cambio rank diretto → Put On o Put Off secondo la direzione | Big Homie |
+| `/member roles` | Badge e specializzazioni | Big Homie |
 | `/member status` | Stato di membership | tutti |
-| `/member inactive` / `active` | Cambio stato | Big |
-| `/member remove` | Uscita dalla gang (**non** dal Discord) | Big |
+| `/member inactive` / `active` | Cambio stato | Big Homie |
+| `/member remove` | Uscita dalla gang (**non** dal Discord) | Big Homie |
 | `/member permadeath` | Permadeath, con conferma esplicita | OG |
 | `/community list` | Verificati, friend, mafia | tutti |
 | `/community info` | Dossier completo su un utente | tutti |
-| `/community verified` | Assegna o revoca Verified a mano | Big |
-| `/community friend` / `mafia` | Ruoli di relazione | Big |
+| `/community verified` | Assegna o revoca Verified a mano | Big Homie |
+| `/community friend` / `mafia` | Ruoli di relazione | Big Homie |
 | `/community revoke` | Revoca l'accesso community | Big |
 | `/community makettp` | Ingresso nella gang dalla community | Big |
 | `/blacklist add` / `remove` / `info` / `list` | Blacklist | Big* |
@@ -609,10 +653,11 @@ da fare. Serve a *verificare* firme, non a produrle.
 L'autorizzazione **non** si appoggia solo alle Discord permission: esiste una
 matrice applicativa (`src/config/permissions.ts`, Phase 2+).
 
-| Operazione | OG | Big | Young OG | Gangster / Resident |
+| Operazione | OG | Big Homie | Original Tiny Loc | Tutti gli altri rank |
 | --- | :-: | :-: | :-: | :-: |
 | roster | ✅ | ✅ | ✅ | ✅ |
 | member info | ✅ | ✅ | ✅ | ✅ |
+| note Leadership | ✅ | ✅ | ✅ | ❌ |
 | review candidature TTP | ✅ | ✅ | configurabile | ❌ |
 | add TTP | ✅ | ✅ | ❌ | ❌ |
 | promote / demote | ✅ | limitato | ❌ | ❌ |
@@ -626,10 +671,21 @@ matrice applicativa (`src/config/permissions.ts`, Phase 2+).
 
 Regole non negoziabili:
 
-- Big **non** può amministrare OG.
-- Di default Big **non** può amministrare un altro Big.
+- Big Homie **non** può amministrare OG.
+- Di default Big Homie **non** può amministrare un altro Big Homie.
 - `OWNER_ID` ha sempre accesso amministrativo completo.
 - Oltre alla matrice si controlla sempre la gerarchia Discord reale.
+
+> **Il rank `Big` non è Leadership.**
+> Con la gerarchia a cinque rank il rank amministrativo si chiamava `Big`;
+> oggi quello stesso ruolo Discord si chiama **Big Homie**, e `Big` è un rank
+> **nuovo**, più in basso, con un ruolo Discord suo. Non ha ereditato nessun
+> permesso: sta in "tutti gli altri rank". Stessa cosa per `Original Tiny Loc`,
+> che è l'ex `Young OG` e ne conserva esattamente le policy.
+>
+> Le colonne di `GuildConfig` conservano i nomi legacy (`bigCan…`,
+> `youngOgCan…`) per non richiedere una migration cosmetica: `bigCan…` si
+> applica a **Big Homie**, `youngOgCan…` a **Original Tiny Loc**.
 
 ---
 
@@ -728,6 +784,50 @@ entrato e *chi* è uscito.
 L'avatar è mostrato in grande (`setImage`) e risolto dal CDN ufficiale
 Discord. Per il goodbye l'utente non è più nella guild, quindi il profilo
 arriva da `GET /users/{id}` — nessuna colonna nuova a database.
+
+### Put On / Put Off
+
+Quando un membro TTP cambia rank, la gang lo vede: un annuncio pubblico in
+`CHANNEL_PUT_ON_OFF_ID`, costruito da `RankAnnouncementService`.
+
+| | Quando | Colore |
+| --- | --- | :-: |
+| 🔥 **PUT ON** | il rank **sale** | success |
+| 📉 **PUT OFF** | il rank **scende** | warning |
+
+La direzione si calcola con `compareRanks`, mai confrontando i nomi dei rank.
+
+**L'annuncio è agganciato all'operazione, non al comando.** `/member promote`,
+`/member demote`, `/member rank` e i bottoni della member card passano tutti
+dallo stesso `MemberService.changeRank`: nessun handler invia annunci per conto
+suo, quindi non esiste un punto d'ingresso che possa dimenticarsene o
+pubblicarne due.
+
+Cosa **non** è un Put On:
+
+- l'**ingresso nella gang** a Resident — non si viene "messi su" da nessuna
+  parte; vale anche per `/member add` con un rank esplicito e per
+  l'approvazione di una candidatura;
+- un cambio rank **verso lo stesso rank**, che resta un errore
+  (`RANK_UNCHANGED`) e non annuncia nulla;
+- `inactive` / `active` / `remove`, che non toccano il rank.
+
+**Best-effort, e ultimo della fila.** L'ordine di un cambio di rank è:
+
+```text
+validazione → DB (locking ottimistico) → ruoli Discord → compensazione
+→ MemberHistory → AuditLog → annuncio Put On/Put Off
+```
+
+L'annuncio è l'unico passo non autorevole. Se il canale è mal configurato o
+Discord non risponde, l'errore viene loggato e basta: la promozione **resta
+valida**, non viene ritentata, `Member.version` non viene toccato e
+l'interaction dell'operatore non fallisce. Il dato autorevole è il database,
+non il messaggio.
+
+L'audit non cambia: le azioni restano `PROMOTED`, `DEMOTED` e `RANK_CHANGED`,
+che descrivono già la mutazione. Put On / Put Off è **presentazione**, non un
+nuovo tipo di evento.
 
 Il cron è la ragione per cui il progetto sta comodamente nel piano gratuito:
 288 esecuzioni al giorno, ognuna con una manciata di richieste (l'enumerazione

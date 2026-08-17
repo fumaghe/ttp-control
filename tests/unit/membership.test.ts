@@ -20,6 +20,19 @@ import {
 const USER = '900000000000000001';
 const OG = '900000000000000010';
 
+/** Tutti e nove i ruoli della gerarchia: un membro TTP ne ha esattamente uno. */
+const ALL_RANK_ROLE_IDS = [
+  ROLE_IDS.resident,
+  ROLE_IDS.gangBanger,
+  ROLE_IDS.infantilLoc,
+  ROLE_IDS.tinyLoc,
+  ROLE_IDS.loc,
+  ROLE_IDS.originalTinyLoc,
+  ROLE_IDS.big,
+  ROLE_IDS.bigHomie,
+  ROLE_IDS.og,
+];
+
 let h: Harness;
 
 /** Utente verificato e già dentro la gang, pronto per i test di gerarchia. */
@@ -114,7 +127,7 @@ describe('ingresso nella gang', () => {
 });
 
 describe('promote', () => {
-  it('Resident → Gangster', async () => {
+  it('Resident → Gang Banger', async () => {
     await joinedMember(MemberRank.RESIDENT);
     const outcome = await h.members.promote({
       discordId: USER,
@@ -122,28 +135,35 @@ describe('promote', () => {
       reason: 'Merito',
     });
 
-    expect(outcome.toRank).toBe(MemberRank.GANGSTER);
-    expect(h.guild.members.get(USER)?.roles.has(ROLE_IDS.gangster)).toBe(true);
+    expect(outcome.toRank).toBe(MemberRank.GANG_BANGER);
+    expect(h.guild.members.get(USER)?.roles.has(ROLE_IDS.gangBanger)).toBe(true);
   });
 
-  it('Gangster → Young OG', async () => {
-    await joinedMember(MemberRank.GANGSTER);
-    const outcome = await h.members.promote({
-      discordId: USER,
-      actorDiscordId: OG,
-      reason: 'Merito',
-    });
-    expect(outcome.toRank).toBe(MemberRank.YOUNG_OG);
-  });
+  it('avanza di UN solo gradino lungo tutta la gerarchia', async () => {
+    // Ogni coppia è un gradino della scala a nove rank: un promote non deve
+    // mai saltarne uno, nemmeno fra i rank aggiunti dopo la V1.
+    const steps = [
+      [MemberRank.RESIDENT, MemberRank.GANG_BANGER],
+      [MemberRank.GANG_BANGER, MemberRank.INFANTIL_LOC],
+      [MemberRank.INFANTIL_LOC, MemberRank.TINY_LOC],
+      [MemberRank.TINY_LOC, MemberRank.LOC],
+      [MemberRank.LOC, MemberRank.ORIGINAL_TINY_LOC],
+      [MemberRank.ORIGINAL_TINY_LOC, MemberRank.BIG],
+      [MemberRank.BIG, MemberRank.BIG_HOMIE],
+      [MemberRank.BIG_HOMIE, MemberRank.OG],
+    ] as const;
 
-  it('Young OG → Big', async () => {
-    await joinedMember(MemberRank.YOUNG_OG);
-    const outcome = await h.members.promote({
-      discordId: USER,
-      actorDiscordId: OG,
-      reason: 'Merito',
-    });
-    expect(outcome.toRank).toBe(MemberRank.BIG);
+    for (const [from, to] of steps) {
+      h = createHarness();
+      await joinedMember(from);
+      const outcome = await h.members.promote({
+        discordId: USER,
+        actorDiscordId: OG,
+        reason: 'Merito',
+      });
+      expect(outcome.fromRank).toBe(from);
+      expect(outcome.toRank).toBe(to);
+    }
   });
 
   it('lascia esattamente un rank dopo la promozione', async () => {
@@ -151,16 +171,10 @@ describe('promote', () => {
     await h.members.promote({ discordId: USER, actorDiscordId: OG, reason: 'Merito' });
 
     const roles = h.guild.members.get(USER)?.roles;
-    const rankRoles = [
-      ROLE_IDS.resident,
-      ROLE_IDS.gangster,
-      ROLE_IDS.youngOg,
-      ROLE_IDS.big,
-      ROLE_IDS.og,
-    ].filter((id) => roles?.has(id));
+    const rankRoles = ALL_RANK_ROLE_IDS.filter((id) => roles?.has(id));
 
     expect(rankRoles).toHaveLength(1);
-    expect(rankRoles[0]).toBe(ROLE_IDS.gangster);
+    expect(rankRoles[0]).toBe(ROLE_IDS.gangBanger);
   });
 
   it('rifiuta la promozione oltre OG', async () => {
@@ -181,14 +195,29 @@ describe('promote', () => {
 });
 
 describe('demote', () => {
-  it('Young OG → Gangster', async () => {
-    await joinedMember(MemberRank.YOUNG_OG);
-    const outcome = await h.members.demote({
-      discordId: USER,
-      actorDiscordId: OG,
-      reason: 'Inattività',
-    });
-    expect(outcome.toRank).toBe(MemberRank.GANGSTER);
+  it('retrocede di UN solo gradino lungo tutta la gerarchia', async () => {
+    const steps = [
+      [MemberRank.OG, MemberRank.BIG_HOMIE],
+      [MemberRank.BIG_HOMIE, MemberRank.BIG],
+      [MemberRank.BIG, MemberRank.ORIGINAL_TINY_LOC],
+      [MemberRank.ORIGINAL_TINY_LOC, MemberRank.LOC],
+      [MemberRank.LOC, MemberRank.TINY_LOC],
+      [MemberRank.TINY_LOC, MemberRank.INFANTIL_LOC],
+      [MemberRank.INFANTIL_LOC, MemberRank.GANG_BANGER],
+      [MemberRank.GANG_BANGER, MemberRank.RESIDENT],
+    ] as const;
+
+    for (const [from, to] of steps) {
+      h = createHarness();
+      await joinedMember(from);
+      const outcome = await h.members.demote({
+        discordId: USER,
+        actorDiscordId: OG,
+        reason: 'Inattività',
+      });
+      expect(outcome.fromRank).toBe(from);
+      expect(outcome.toRank).toBe(to);
+    }
   });
 
   it('un Resident non viene espulso dalla gang: si indica /member remove', async () => {
@@ -206,7 +235,7 @@ describe('demote', () => {
 
 describe('inactive / active', () => {
   it('inactive conserva membership, rank e badge', async () => {
-    await joinedMember(MemberRank.GANGSTER);
+    await joinedMember(MemberRank.TINY_LOC);
     await h.members.addSpecialRole({
       discordId: USER,
       actorDiscordId: OG,
@@ -218,7 +247,7 @@ describe('inactive / active', () => {
     const roles = h.guild.members.get(USER)?.roles;
     expect(roles?.has(ROLE_IDS.inactive)).toBe(true);
     expect(roles?.has(ROLE_IDS.ttp)).toBe(true);
-    expect(roles?.has(ROLE_IDS.gangster)).toBe(true);
+    expect(roles?.has(ROLE_IDS.tinyLoc)).toBe(true);
     expect(roles?.has(ROLE_IDS.verified)).toBe(true);
     expect(roles?.has(ROLE_IDS.shooter)).toBe(true);
     expect((await h.members.find(USER))?.status).toBe(MemberStatus.INACTIVE);
@@ -233,21 +262,21 @@ describe('inactive / active', () => {
   });
 
   it('active rimuove il ruolo Inactive e conserva il resto', async () => {
-    await joinedMember(MemberRank.GANGSTER);
+    await joinedMember(MemberRank.TINY_LOC);
     await h.members.setInactive({ discordId: USER, actorDiscordId: OG });
     await h.members.setActive({ discordId: USER, actorDiscordId: OG });
 
     const roles = h.guild.members.get(USER)?.roles;
     expect(roles?.has(ROLE_IDS.inactive)).toBe(false);
     expect(roles?.has(ROLE_IDS.ttp)).toBe(true);
-    expect(roles?.has(ROLE_IDS.gangster)).toBe(true);
+    expect(roles?.has(ROLE_IDS.tinyLoc)).toBe(true);
     expect((await h.members.find(USER))?.status).toBe(MemberStatus.ACTIVE);
   });
 });
 
 describe('rimozione dalla gang', () => {
   it('conserva Verified', async () => {
-    await joinedMember(MemberRank.GANGSTER);
+    await joinedMember(MemberRank.TINY_LOC);
     await h.members.removeFromGang({
       discordId: USER,
       actorDiscordId: OG,
@@ -257,7 +286,7 @@ describe('rimozione dalla gang', () => {
     const roles = h.guild.members.get(USER)?.roles;
     expect(roles?.has(ROLE_IDS.verified)).toBe(true);
     expect(roles?.has(ROLE_IDS.ttp)).toBe(false);
-    expect(roles?.has(ROLE_IDS.gangster)).toBe(false);
+    expect(roles?.has(ROLE_IDS.tinyLoc)).toBe(false);
   });
 
   it('non cancella il record né lo storico', async () => {
@@ -303,7 +332,7 @@ describe('rimozione dalla gang', () => {
 
 describe('permadeath', () => {
   it('assegna Permadeath e rimuove TTP e rank', async () => {
-    await joinedMember(MemberRank.BIG);
+    await joinedMember(MemberRank.BIG_HOMIE);
     await h.members.permadeath({
       discordId: USER,
       actorDiscordId: OG,
@@ -313,11 +342,11 @@ describe('permadeath', () => {
     const roles = h.guild.members.get(USER)?.roles;
     expect(roles?.has(ROLE_IDS.permadeath)).toBe(true);
     expect(roles?.has(ROLE_IDS.ttp)).toBe(false);
-    expect(roles?.has(ROLE_IDS.big)).toBe(false);
+    expect(roles?.has(ROLE_IDS.bigHomie)).toBe(false);
   });
 
   it('conserva il record e tutto lo storico', async () => {
-    await joinedMember(MemberRank.GANGSTER);
+    await joinedMember(MemberRank.TINY_LOC);
     await h.members.promote({ discordId: USER, actorDiscordId: OG, reason: 'Merito' });
     const historyBefore = h.store.history.length;
 
@@ -351,7 +380,7 @@ describe('ruoli speciali', () => {
   });
 
   it('non tocca membership né rank', async () => {
-    await joinedMember(MemberRank.GANGSTER);
+    await joinedMember(MemberRank.TINY_LOC);
     await h.members.addSpecialRole({
       discordId: USER,
       actorDiscordId: OG,
@@ -361,6 +390,6 @@ describe('ruoli speciali', () => {
     const roles = h.guild.members.get(USER)?.roles;
     expect(roles?.has(ROLE_IDS.mainShooter)).toBe(true);
     expect(roles?.has(ROLE_IDS.ttp)).toBe(true);
-    expect(roles?.has(ROLE_IDS.gangster)).toBe(true);
+    expect(roles?.has(ROLE_IDS.tinyLoc)).toBe(true);
   });
 });

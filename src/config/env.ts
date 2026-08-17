@@ -183,10 +183,17 @@ function build(source: EnvSource) {
       verified: read.snowflake('ROLE_VERIFIED_ID'),
       ttp: read.snowflake('ROLE_TTP_ID'),
 
+      // Gerarchia TTP, dal rank piu' alto al piu' basso. L'ordine autorevole
+      // resta `RANK_ORDER` in src/config/constants.ts: qui c'e' solo la
+      // corrispondenza rank -> ruolo Discord.
       og: read.snowflake('ROLE_OG_ID'),
+      bigHomie: read.snowflake('ROLE_BIG_HOMIE_ID'),
       big: read.snowflake('ROLE_BIG_ID'),
-      youngOg: read.snowflake('ROLE_YOUNG_OG_ID'),
-      gangster: read.snowflake('ROLE_GANGSTER_ID'),
+      originalTinyLoc: read.snowflake('ROLE_ORIGINAL_TINY_LOC_ID'),
+      loc: read.snowflake('ROLE_LOC_ID'),
+      tinyLoc: read.snowflake('ROLE_TINY_LOC_ID'),
+      infantilLoc: read.snowflake('ROLE_INFANTIL_LOC_ID'),
+      gangBanger: read.snowflake('ROLE_GANG_BANGER_ID'),
       resident: read.snowflake('ROLE_RESIDENT_ID'),
 
       friend: read.snowflake('ROLE_FRIEND_ID'),
@@ -213,6 +220,8 @@ function build(source: EnvSource) {
       auditLog: read.snowflake('CHANNEL_AUDIT_LOG_ID'),
       blacklist: read.snowflake('CHANNEL_BLACKLIST_ID'),
       controlPanel: read.snowflake('CHANNEL_CONTROL_PANEL_ID'),
+      /** Annunci pubblici Put On / Put Off (cambi di rank di un membro TTP). */
+      putOnOff: read.snowflake('CHANNEL_PUT_ON_OFF_ID'),
       /** Messaggi automatici di benvenuto (riconciliazione: nuovo membro). */
       welcome: read.snowflake('CHANNEL_WELCOME_ID'),
       /** Messaggi automatici di addio (riconciliazione: membro uscito). */

@@ -35,12 +35,30 @@ datasource db {
 // ENUM
 // =============================================================================
 
-/// Gerarchia TTP: RESIDENT -> GANGSTER -> YOUNG_OG -> BIG -> OG
+/// Gerarchia TTP, dal piu' basso al piu' alto:
+/// RESIDENT -> GANG_BANGER -> INFANTIL_LOC -> TINY_LOC -> LOC ->
+/// ORIGINAL_TINY_LOC -> BIG -> BIG_HOMIE -> OG
+///
+/// L'ordine di dichiarazione e' anche l'ordine dei valori dell'enum a
+/// database (vedi la migration 20260818000000_nine_rank_hierarchy), quindi
+/// un `ORDER BY rank` in SQL segue la gerarchia. La fonte di verita'
+/// APPLICATIVA resta comunque `RANK_ORDER` in src/config/constants.ts.
+///
+/// NOTA STORICA — la V1 aveva cinque rank: RESIDENT, GANGSTER, YOUNG_OG,
+/// BIG, OG. I valori legacy non sono stati cancellati ma RINOMINATI, perche'
+/// i ruoli Discord corrispondenti sono stati riutilizzati:
+///   GANGSTER -> TINY_LOC, YOUNG_OG -> ORIGINAL_TINY_LOC, BIG -> BIG_HOMIE.
+/// Il BIG di questa enum e' quindi un rank NUOVO, con un ruolo Discord nuovo:
+/// non ha niente a che vedere con il BIG della V1.
 enum MemberRank {
   RESIDENT
-  GANGSTER
-  YOUNG_OG
+  GANG_BANGER
+  INFANTIL_LOC
+  TINY_LOC
+  LOC
+  ORIGINAL_TINY_LOC
   BIG
+  BIG_HOMIE
   OG
 }
 
@@ -370,6 +388,15 @@ model GuildConfig {
   guildId String @id
 
   /// --- Policy di authorization (vedi src/config/permissions.ts) ---
+  ///
+  /// I NOMI DI QUESTE COLONNE SONO LEGACY, il significato no.
+  /// Con la gerarchia a nove rank il ruolo che si chiamava `BIG` si chiama
+  /// `BIG_HOMIE`, e quello che si chiamava `YOUNG_OG` si chiama
+  /// `ORIGINAL_TINY_LOC`. Le colonne conservano il nome originale per non
+  /// richiedere una migration puramente cosmetica su dati gia' in produzione:
+  ///   big*   -> si applica a BIG_HOMIE        (NON al nuovo rank BIG)
+  ///   youngOg* -> si applica a ORIGINAL_TINY_LOC
+  /// Il nuovo rank BIG non e' Leadership e nessuna di queste policy lo tocca.
   bigCanManageBig              Boolean @default(false)
   bigCanPromoteToLeadership    Boolean @default(false)
   bigCanBlacklist              Boolean @default(true)
