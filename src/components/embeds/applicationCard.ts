@@ -32,20 +32,26 @@ export function buildApplicationEmbed(
     );
 
   if (verification) {
+    const icName = [verification.rpName, verification.rpSurname]
+      .filter(Boolean)
+      .join(' ');
+
     embed.addFields(
       {
         name: 'Nome IC',
-        value: escapeMarkdown(`${verification.rpName} ${verification.rpSurname}`),
+        value: escapeMarkdown(icName),
         inline: true,
       },
-      { name: 'Citizen ID', value: `\`${verification.citizenId}\``, inline: true },
-      { name: 'Telefono', value: `\`${verification.phone}\``, inline: true },
       {
-        name: 'Referral',
-        value: truncate(escapeMarkdown(verification.referral)),
-        inline: false,
+        name: 'Nome OOC',
+        value: escapeMarkdown(verification.oocName ?? '—'),
+        inline: true,
       },
-      { name: 'Verified', value: formatDate(verification.verifiedAt), inline: true },
+      {
+        name: 'Verified',
+        value: formatDate(verification.verifiedAt),
+        inline: true,
+      },
     );
   } else {
     embed.addFields({

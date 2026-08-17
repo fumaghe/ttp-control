@@ -40,7 +40,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "<hyperdrive-id>",
+      "id": "76cb561b692045b3b846ec6d0d1df3a4",
       "localConnectionString": "postgresql://user:password@localhost:5432/ttp_control",
     },
   ],

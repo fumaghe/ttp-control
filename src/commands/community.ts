@@ -209,8 +209,11 @@ export const communityCommand: SlashCommand = {
 
         if (dossier.verification && dossier.verification.rpName !== '—') {
           embed.addFields({
-            name: 'Personaggio',
-            value: `${escapeMarkdown(dossier.verification.rpName)} ${escapeMarkdown(dossier.verification.rpSurname)} · ID \`${dossier.verification.citizenId}\``,
+            name: 'Verifica',
+            value: [
+              `**Nome IC:** ${escapeMarkdown(dossier.verification.rpName)}`,
+              `**Nome OOC:** ${escapeMarkdown(dossier.verification.oocName ?? '—')}`,
+            ].join('\n'),
             inline: false,
           });
         }

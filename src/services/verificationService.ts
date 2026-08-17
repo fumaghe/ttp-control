@@ -24,10 +24,7 @@ import type { GuildMemberSnapshot, RoleGateway } from './roleGateway.js';
  */
 export interface RawVerificationForm {
   readonly rpName: string | null;
-  readonly rpSurname: string | null;
-  readonly citizenId: string | null;
-  readonly phone: string | null;
-  readonly referral: string | null;
+  readonly oocName: string | null;
 }
 
 export interface VerifyRequest {
@@ -68,12 +65,8 @@ export function createVerificationService(deps: {
       // Validazione e normalizzazione: fuori dal lock, non tocca stato.
       const form = validateVerificationForm({
         rpName: request.form.rpName ?? null,
-        rpSurname: request.form.rpSurname ?? null,
-        citizenId: request.form.citizenId ?? null,
-        phone: request.form.phone ?? null,
-        referral: request.form.referral ?? null,
+        oocName: request.form.oocName ?? null,
       });
-
       return memberMutex.run(lockKey('verify', request.discordId), async () => {
         // --- 1. Il membro e' ancora nel server? --------------------------
         const snapshot = await gateway.fetchMember(request.discordId);
@@ -149,9 +142,7 @@ export function createVerificationService(deps: {
           entityId: verification.id,
           metadata: {
             rpName: verification.rpName,
-            rpSurname: verification.rpSurname,
-            citizenId: verification.citizenId,
-            referral: verification.referral,
+            oocName: verification.oocName,
           },
         });
 

@@ -43,10 +43,7 @@ export const verifyModalHandler: ModalHandler = {
     try {
       const form = validateVerificationForm({
         rpName: interaction.fields.getTextInputValue(VERIFY_FIELDS.rpName),
-        rpSurname: interaction.fields.getTextInputValue(VERIFY_FIELDS.rpSurname),
-        citizenId: interaction.fields.getTextInputValue(VERIFY_FIELDS.citizenId),
-        phone: interaction.fields.getTextInputValue(VERIFY_FIELDS.phone),
-        referral: interaction.fields.getTextInputValue(VERIFY_FIELDS.referral),
+        oocName: interaction.fields.getTextInputValue(VERIFY_FIELDS.oocName),
       });
 
       const outcome = await ctx.verification.verify({

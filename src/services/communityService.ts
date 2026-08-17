@@ -176,10 +176,7 @@ export function createCommunityService(deps: {
           const created = await repos.verifications.create({
             discordId: input.discordId,
             rpName: '—',
-            rpSurname: '—',
-            citizenId: '—',
-            phone: '—',
-            referral: `Verifica manuale di <@${input.actorDiscordId}>`,
+            oocName: snapshot.displayName,
           });
           await repos.profiles.setVerifiedAt(input.discordId, created.verifiedAt);
         }

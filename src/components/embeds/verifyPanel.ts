@@ -15,10 +15,7 @@ export const VERIFY_MODAL_ID = buildCustomId('verify', 'submit');
 /** ID dei campi del modal: usati anche in lettura al submit. */
 export const VERIFY_FIELDS = {
   rpName: 'rpName',
-  rpSurname: 'rpSurname',
-  citizenId: 'citizenId',
-  phone: 'phone',
-  referral: 'referral',
+  oocName: 'oocName',
 } as const;
 
 export function buildVerifyPanel(): MessagePayload {
@@ -28,7 +25,7 @@ export function buildVerifyPanel(): MessagePayload {
         `Benvenuto nel Discord di **${GANG_NAME}**.`,
         '',
         'Per accedere alle aree della community devi completare la verifica.',
-        'Ti verranno chiesti i dati del tuo personaggio **in character**.',
+        'Ti verranno chiesti solamente il tuo **Nome IC** e il tuo **Nome OOC**.',
         '',
         '**Cosa ottieni**',
         '✅ il ruolo `Verified`',
@@ -59,42 +56,18 @@ export function buildVerifyModal(): ModalBuilder {
       textField({
         customId: VERIFY_FIELDS.rpName,
         label: 'Nome IC',
-        placeholder: 'Il nome del tuo personaggio',
+        placeholder: 'Nome completo del tuo personaggio',
         style: TextInputStyle.Short,
         minLength: 2,
-        maxLength: 32,
+        maxLength: 64,
       }),
       textField({
-        customId: VERIFY_FIELDS.rpSurname,
-        label: 'Cognome IC',
-        placeholder: 'Il cognome del tuo personaggio',
+        customId: VERIFY_FIELDS.oocName,
+        label: 'Nome OOC',
+        placeholder: 'Il tuo nome OOC',
         style: TextInputStyle.Short,
         minLength: 2,
-        maxLength: 32,
-      }),
-      textField({
-        customId: VERIFY_FIELDS.citizenId,
-        label: 'ID cittadino',
-        placeholder: 'Es. 8712',
-        style: TextInputStyle.Short,
-        minLength: 1,
-        maxLength: 16,
-      }),
-      textField({
-        customId: VERIFY_FIELDS.phone,
-        label: 'Telefono IC',
-        placeholder: 'Es. 555-1234',
-        style: TextInputStyle.Short,
-        minLength: 3,
-        maxLength: 20,
-      }),
-      textField({
-        customId: VERIFY_FIELDS.referral,
-        label: 'Come conosci i TTP?',
-        placeholder: 'Chi ti ha invitato, dove ci hai incontrati…',
-        style: TextInputStyle.Paragraph,
-        minLength: 3,
-        maxLength: 300,
+        maxLength: 64,
       }),
     );
 }

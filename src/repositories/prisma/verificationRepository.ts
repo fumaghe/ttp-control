@@ -10,23 +10,34 @@ export function createVerificationRepository(db: Database): VerificationReposito
      */
     async create(input: VerificationInput): Promise<Verification> {
       const now = new Date();
+
       return db.verification.upsert({
-        where: { discordId: input.discordId },
+        where: {
+          discordId: input.discordId,
+        },
+
         create: {
           discordId: input.discordId,
           rpName: input.rpName,
-          rpSurname: input.rpSurname,
-          citizenId: input.citizenId,
-          phone: input.phone,
-          referral: input.referral,
+          oocName: input.oocName,
+
+          rpSurname: null,
+          citizenId: null,
+          phone: null,
+          referral: null,
+
           verifiedAt: now,
         },
+
         update: {
           rpName: input.rpName,
-          rpSurname: input.rpSurname,
-          citizenId: input.citizenId,
-          phone: input.phone,
-          referral: input.referral,
+          oocName: input.oocName,
+
+          rpSurname: null,
+          citizenId: null,
+          phone: null,
+          referral: null,
+
           verifiedAt: now,
           revokedAt: null,
           revokedByDiscordId: null,

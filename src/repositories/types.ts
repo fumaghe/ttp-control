@@ -70,10 +70,7 @@ export interface DiscordProfileRepository {
 export interface VerificationInput {
   readonly discordId: string;
   readonly rpName: string;
-  readonly rpSurname: string;
-  readonly citizenId: string;
-  readonly phone: string;
-  readonly referral: string;
+  readonly oocName: string;
 }
 
 export interface VerificationRepository {

@@ -299,11 +299,8 @@ export function createHarness(): Harness {
 /** Dati validi per il modal di verifica. */
 export function validForm(overrides: Partial<RawVerificationForm> = {}): RawVerificationForm {
   return {
-    rpName: 'Tony',
-    rpSurname: 'Montana',
-    citizenId: '8712',
-    phone: '555-1234',
-    referral: 'Conosciuto in strada',
+    rpName: 'Tony Montana',
+    oocName: 'Andrea',
     ...overrides,
   };
 }

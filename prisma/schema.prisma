@@ -158,15 +158,21 @@ model Verification {
   id        String @id @default(cuid())
   discordId String @unique
 
-  rpName    String
-  rpSurname String
-  citizenId String
-  phone     String
-  referral  String
+  /// Nome completo del personaggio IC.
+  rpName  String
+
+  /// Nome del player fuori dal personaggio.
+  /// Nullable per compatibilità con le verifiche create prima della V2.
+  oocName String?
+
+  /// Campi legacy: mantenuti nullable per non distruggere lo storico.
+  rpSurname String?
+  citizenId String?
+  phone     String?
+  referral  String?
 
   verifiedAt DateTime @default(now())
 
-  /// Revoca (es. `/community revoke`). NULL = verifica attiva.
   revokedAt          DateTime?
   revokedByDiscordId String?
   revokeReason       String?
