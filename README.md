@@ -5,9 +5,9 @@ Bot Discord gestionale per la gang FiveM GTA RP **TTP — Impero**.
 Non è una raccolta di comandi scollegati: è un piccolo gestionale interno con
 audit trail, permission matrix applicativa e stato persistito su PostgreSQL.
 
-> **Stato del progetto:** Phase 0 — bootstrap completato.
-> La logica Discord (verify, applications, member management, roster,
-> community, blacklist, control panel) arriva nelle fasi successive.
+> **Stato del progetto:** V1 completa.
+> Verify, candidature TTP, gestione membri, roster, community, blacklist,
+> control panel, audit, permission matrix, consistency check, deployment.
 
 ---
 
@@ -212,6 +212,66 @@ immediata, a differenza dei comandi globali.
 
 ---
 
+## Comandi
+
+Tutti i comandi rispondono in **ephemeral** quando mostrano dati amministrativi:
+note della Leadership, motivazioni e dettagli di blacklist non finiscono mai in
+un canale pubblico.
+
+### Pubblici
+
+| Comando | Cosa fa |
+| --- | --- |
+| `/ping` | Latenza gateway, stato del database, uptime |
+| `/apply ttp` | Invia una candidatura d'ingresso nella gang |
+| `/apply cancel` | Ritira la propria candidatura in attesa |
+| `/apply status` | Storico delle proprie candidature |
+| `/roster` | Elenco dei membri per rank, con filtri e paginazione |
+
+### Leadership
+
+| Comando | Cosa fa | Minimo |
+| --- | --- | --- |
+| `/setup check` | Verifica ruoli, canali, permessi, gerarchia, database | OG |
+| `/setup verify-panel` | Pubblica (o aggiorna) il pannello di verifica | OG |
+| `/setup control-panel` | Pubblica (o aggiorna) il control panel | OG |
+| `/member info` | Scheda del membro con azioni rapide | tutti |
+| `/member add` | Ingresso manuale nella gang | Big |
+| `/member promote` | Rank successivo | Big |
+| `/member demote` | Rank precedente | Big |
+| `/member rank` | Cambio rank diretto | Big |
+| `/member roles` | Badge e specializzazioni | Big |
+| `/member status` | Stato di membership | tutti |
+| `/member inactive` / `active` | Cambio stato | Big |
+| `/member remove` | Uscita dalla gang (**non** dal Discord) | Big |
+| `/member permadeath` | Permadeath, con conferma esplicita | OG |
+| `/community list` | Verificati, friend, mafia | tutti |
+| `/community info` | Dossier completo su un utente | tutti |
+| `/community verified` | Assegna o revoca Verified a mano | Big |
+| `/community friend` / `mafia` | Ruoli di relazione | Big |
+| `/community revoke` | Revoca l'accesso community | Big |
+| `/community makettp` | Ingresso nella gang dalla community | Big |
+| `/blacklist add` / `remove` / `info` / `list` | Blacklist | Big* |
+| `/panel` | Control panel effimero | Big* |
+| `/system sync-check` | Report di integrità Discord ↔ database | OG |
+
+\* configurabile nella policy della guild.
+
+### Interazioni
+
+| Componente | Dove |
+| --- | --- |
+| 🔐 `VERIFY` + modal | pannello nel canale verify |
+| ✅ `APPROVE TTP` / ❌ `REJECT` / 🚫 `BLACKLIST` | canale candidature |
+| ⬆ `PROMOTE` / ⬇ `DEMOTE` / 🎭 `ROLES` / 💤 `STATUS` / 📝 `NOTES` / 🚪 `REMOVE` | member card |
+| 👥 `MEMBERS` / 🏙 `COMMUNITY` / 📋 `ROSTER` / 📨 `TTP REQUESTS` / 🔍 `SEARCH` / 🚫 `BLACKLIST` | control panel |
+| ◀️ ▶️ paginazione | roster |
+
+**Ogni click ricontrolla i permessi.** Un pannello generato in passato da un OG
+non autorizza chi ci clicca sopra adesso.
+
+---
+
 ## Struttura del progetto
 
 ```text
@@ -400,6 +460,57 @@ verificare periodicamente il restore su un branch Neon usa e getta.
 
 ---
 
+## Deployment
+
+Target: **VPS Linux con Docker**. Il database è Neon, quindi non c'è nessun
+servizio PostgreSQL da orchestrare e nessun volume dati da gestire.
+
+```bash
+git clone git@github.com:fumaghe/ttp-control.git /opt/ttp-control
+cd /opt/ttp-control
+cp .env.example .env      # compila DISCORD_TOKEN, DATABASE_URL, DIRECT_URL
+chmod 600 .env
+
+npm ci --ignore-scripts && npx prisma generate
+npm run prisma:migrate:deploy   # applica le migration a Neon
+
+docker compose up -d --build
+docker compose logs -f
+```
+
+Cosa garantisce la configurazione:
+
+| Requisito | Come |
+| --- | --- |
+| Nessun secret nell'immagine | `.env` è in `.dockerignore`, letto a runtime da `env_file` |
+| Utente non-root | l'immagine gira come `node` |
+| Solo dipendenze di produzione | stage `deps` con `npm ci --omit=dev` |
+| Riavvio dopo crash e reboot | `restart: unless-stopped` |
+| Graceful shutdown | `dumb-init` come PID 1, SIGTERM → chiusura di client e pool |
+| Log limitati | rotazione json-file, 10 MB × 5 |
+| Filesystem in sola lettura | `read_only: true` + `tmpfs` per `/tmp` |
+| Nessuna escalation | `no-new-privileges` |
+
+Aggiornamento:
+
+```bash
+git pull
+npm run prisma:migrate:deploy   # se ci sono nuove migration
+docker compose up -d --build
+```
+
+Alternativa senza Docker (systemd + `npm run build` + `npm start`) è
+altrettanto valida: il bot legge la configurazione dall'ambiente in entrambi i
+casi.
+
+### CI
+
+`.github/workflows/ci.yml` esegue su ogni push e PR: typecheck, lint,
+format-check, test, build e `npm audit --omit=dev`. Non serve un database:
+`prisma generate` legge solo lo schema.
+
+---
+
 ## Troubleshooting
 
 **`Environment variable not found: DATABASE_URL`**
@@ -429,10 +540,24 @@ I pannelli persistenti sono tracciati nella tabella `PersistentPanel`
 (`channelId` + `messageId`). Se il record è stato perso, cancella il messaggio
 orfano e ripubblica il pannello.
 
-**`npm audit` segnala `deepmerge-ts` (high)**
-Vulnerabilità transitiva di `@prisma/config`, dipendenza **solo di sviluppo**
-della CLI Prisma. Non raggiungibile a runtime dal bot e senza fix upstream
-disponibile su Prisma 7.9.1. Da rivalutare a ogni aggiornamento di Prisma.
+**`npm audit` segnala `deepmerge-ts`**
+Era una vulnerabilità transitiva di `@prisma/config`. È risolta con un
+`overrides` in `package.json` che forza `deepmerge-ts@^8.0.1`, la versione
+corretta. L'alternativa suggerita da `npm audit fix --force` sarebbe stata
+declassare Prisma alla 6.x, cioè rompere schema, generator e adapter: un
+override mirato è la soluzione proporzionata. Alla prossima release di Prisma
+che aggiorna la dipendenza, l'override si può rimuovere.
+
+**Warning `SSL modes 'prefer', 'require'…` all'avvio**
+Avviso di `pg` sul cambio di semantica previsto in `pg` v9: oggi `sslmode=require`
+si comporta come `verify-full`, in futuro no. Con Neon (certificati validi) puoi
+già usare `?sslmode=verify-full` nelle connection string per fissare il
+comportamento attuale ed eliminare l'avviso.
+
+**Il bot resta appeso all'avvio**
+Non può: `connectDatabase` ha un timeout di 15 secondi e il processo termina con
+un messaggio che indica host e database (mai la password). Con Docker il
+`restart: unless-stopped` riprova da solo.
 
 ---
 
@@ -441,20 +566,21 @@ disponibile su Prisma 7.9.1. Da rivalutare a ogni aggiornamento di Prisma.
 | Fase | Contenuto | Stato |
 | --- | --- | --- |
 | 0 | Repository e bootstrap del progetto | ✅ |
-| 1 | Foundation: env, database, client, loader, logger, `/ping` | ⏳ |
-| 2 | `/setup` — system check | ⏳ |
-| 3 | Audit system | ⏳ |
-| 4 | Verify: pannello, modal, ruolo Verified | ⏳ |
-| 5 | Candidature TTP e `/member` | ⏳ |
-| 6 | `/roster` | ⏳ |
-| 7 | `/community` | ⏳ |
-| 8 | `/blacklist` | ⏳ |
-| 9 | `/panel` — control panel | ⏳ |
-| 10 | Discord events | ⏳ |
-| 11 | Data consistency e `/system sync-check` | ⏳ |
+| 1 | Foundation: env, database, client, loader, logger, `/ping` | ✅ |
+| 2 | `/setup` — system check | ✅ |
+| 3 | Audit system | ✅ |
+| 4 | Verify: pannello, modal, ruolo Verified | ✅ |
+| 5 | Candidature TTP e `/member` | ✅ |
+| 6 | `/roster` | ✅ |
+| 7 | `/community` | ✅ |
+| 8 | `/blacklist` | ✅ |
+| 9 | `/panel` — control panel | ✅ |
+| 10 | Discord events | ✅ |
+| 11 | Data consistency e `/system sync-check` | ✅ |
 
 Fuori dalla V1: web dashboard, OAuth2, integrazione FiveM, character linking,
-stash, heist, voting, statistiche.
+stash, heist, voting, statistiche. L'architettura a strati le rende possibili
+senza riscritture, ma non fanno parte di questa versione.
 
 ---
 

@@ -8,10 +8,15 @@
 // La connection string per la CLI e' definita in `prisma.config.ts`;
 // quella di runtime viene passata al driver adapter in `src/database/prisma.ts`.
 //
-// I modelli di dominio (DiscordProfile, Verification, TtpApplication, Member,
-// BlacklistEntry, MemberHistory, AuditLog, GuildConfig, PersistentPanel)
-// verranno introdotti nella Phase 1. Qui definiamo solo gli enum del dominio,
-// che sono gia' stabili e servono da contratto per tutto il progetto.
+// CONVENZIONI
+//  - `discordId` e' sempre `String` (snowflake): mai numerico, mai username.
+//  - Gli username cambiano; l'unico identificativo stabile e' il Discord ID.
+//  - Nulla viene mai cancellato: si usano campi `removedAt` / `revokedAt`.
+//  - I vincoli "al massimo uno attivo" sono garantiti dal DATABASE tramite
+//    colonne-sentinella `@unique` nullable (vedi `pendingForDiscordId`,
+//    `activeKey`): messe a NULL quando la riga non e' piu' attiva, Postgres
+//    ammette infiniti NULL ma un solo valore non-NULL. Sono la difesa contro
+//    le race condition, non un semplice controllo applicativo.
 // =============================================================================
 
 generator client {
@@ -26,9 +31,11 @@ datasource db {
   provider = "postgresql"
 }
 
-// -----------------------------------------------------------------------------
-// Gerarchia TTP: RESIDENT -> GANGSTER -> YOUNG_OG -> BIG -> OG
-// -----------------------------------------------------------------------------
+// =============================================================================
+// ENUM
+// =============================================================================
+
+/// Gerarchia TTP: RESIDENT -> GANGSTER -> YOUNG_OG -> BIG -> OG
 enum MemberRank {
   RESIDENT
   GANGSTER
@@ -37,9 +44,7 @@ enum MemberRank {
   OG
 }
 
-// -----------------------------------------------------------------------------
-// Stato di un membro della gang.
-// -----------------------------------------------------------------------------
+/// Stato di un membro della gang.
 enum MemberStatus {
   ACTIVE
   INACTIVE
@@ -47,10 +52,7 @@ enum MemberStatus {
   LEFT
 }
 
-// -----------------------------------------------------------------------------
-// Ciclo di vita di una candidatura d'ingresso nella gang.
-// Al massimo una PENDING per discordId (vincolo applicato in Phase 1).
-// -----------------------------------------------------------------------------
+/// Ciclo di vita di una candidatura d'ingresso nella gang.
 enum TtpApplicationStatus {
   PENDING
   APPROVED
@@ -58,11 +60,9 @@ enum TtpApplicationStatus {
   CANCELLED
 }
 
-// -----------------------------------------------------------------------------
-// Ruoli speciali gestiti da /member roles.
-// Non includono MAI membership (Verified/TTP), rank, stati o relazioni:
-// quelli hanno workflow dedicati.
-// -----------------------------------------------------------------------------
+/// Ruoli speciali gestiti da `/member roles`.
+/// Non includono MAI membership (Verified/TTP), rank, stati o relazioni:
+/// quelli hanno workflow dedicati.
 enum SpecialRole {
   SHOOTER
   MAIN_SHOOTER
@@ -72,9 +72,7 @@ enum SpecialRole {
   FIRST_DAY
 }
 
-// -----------------------------------------------------------------------------
-// Eventi significativi nella storia di un membro.
-// -----------------------------------------------------------------------------
+/// Eventi significativi nella storia di un membro.
 enum MemberHistoryEvent {
   JOINED_TTP
   LEFT_TTP
@@ -88,14 +86,14 @@ enum MemberHistoryEvent {
   PERMADEATH
 }
 
-// -----------------------------------------------------------------------------
-// Azioni tracciate dall'audit system (Phase 3).
-// -----------------------------------------------------------------------------
+/// Azioni tracciate dall'audit system.
 enum AuditAction {
   USER_VERIFIED
+  VERIFICATION_REVOKED
   TTP_APPLICATION_CREATED
   TTP_APPLICATION_APPROVED
   TTP_APPLICATION_REJECTED
+  TTP_APPLICATION_CANCELLED
   TTP_ADDED
   TTP_REMOVED
   PROMOTED
@@ -105,6 +103,9 @@ enum AuditAction {
   SPECIAL_ROLE_REMOVED
   SET_INACTIVE
   SET_ACTIVE
+  MEMBER_NOTES_UPDATED
+  COMMUNITY_ROLE_GRANTED
+  COMMUNITY_ROLE_REVOKED
   BLACKLISTED
   UNBLACKLISTED
   PERMADEATH
@@ -113,12 +114,292 @@ enum AuditAction {
   ROLE_SYNC_WARNING
   MEMBER_JOINED_DISCORD
   MEMBER_LEFT_DISCORD
+  BLACKLISTED_USER_REJOINED
+  SETUP_RUN
+  SYNC_CHECK_RUN
+  PANEL_PUBLISHED
 }
 
-// -----------------------------------------------------------------------------
-// Tipi di pannello persistente (evita duplicati dopo un restart).
-// -----------------------------------------------------------------------------
+/// Tipi di pannello persistente (evita duplicati dopo un restart).
 enum PanelType {
   VERIFY
   CONTROL_PANEL
+}
+
+// =============================================================================
+// MODELLI
+// =============================================================================
+
+/// Anagrafica Discord. E' l'hub a cui si agganciano verifica, membership e
+/// candidature. `discordId` e' la chiave primaria: stabile per definizione.
+model DiscordProfile {
+  discordId   String    @id
+  username    String
+  displayName String?
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  /// Momento della verifica attualmente valida. NULL se mai verificato o revocato.
+  /// Duplicato denormalizzato di `Verification.verifiedAt` per query veloci.
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  verification Verification?
+  member       Member?
+  applications TtpApplication[]
+
+  @@index([verifiedAt])
+  @@map("discord_profiles")
+}
+
+/// Verifica della community. NON implica membership TTP.
+/// Non richiede alcuna approvazione: viene creata al submit valido del modal.
+model Verification {
+  id        String @id @default(cuid())
+  discordId String @unique
+
+  rpName    String
+  rpSurname String
+  citizenId String
+  phone     String
+  referral  String
+
+  verifiedAt DateTime @default(now())
+
+  /// Revoca (es. `/community revoke`). NULL = verifica attiva.
+  revokedAt          DateTime?
+  revokedByDiscordId String?
+  revokeReason       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile DiscordProfile @relation(fields: [discordId], references: [discordId], onDelete: Cascade)
+
+  @@index([citizenId])
+  @@index([revokedAt])
+  @@map("verifications")
+}
+
+/// Candidatura d'ingresso nella gang. E' questa, una volta APPROVED, a
+/// produrre un `Member` — mai la verifica.
+model TtpApplication {
+  id        String               @id @default(cuid())
+  discordId String
+  status    TtpApplicationStatus @default(PENDING)
+
+  /// Sentinella per il vincolo DB "al massimo una PENDING per utente":
+  /// vale `discordId` finche' lo stato e' PENDING, poi torna NULL.
+  pendingForDiscordId String? @unique
+
+  requestedAt         DateTime    @default(now())
+  reviewedAt          DateTime?
+  reviewedByDiscordId String?
+  rejectionReason     String?
+  /// Rank richiesto in fase di approvazione. NULL = default (RESIDENT).
+  initialRank         MemberRank?
+  notes               String?
+
+  /// Messaggio della richiesta nel canale di review: serve per aggiornarlo
+  /// dopo approve/reject senza ripubblicare.
+  channelId String?
+  messageId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile DiscordProfile @relation(fields: [discordId], references: [discordId], onDelete: Cascade)
+
+  @@index([discordId, status])
+  @@index([status, requestedAt])
+  @@map("ttp_applications")
+}
+
+/// Membro effettivo della gang TTP.
+/// La riga NON viene mai cancellata: uscita e permadeath cambiano `status`.
+model Member {
+  id        String @id @default(cuid())
+  discordId String @unique
+
+  rpName    String?
+  rpSurname String?
+  citizenId String?
+  phone     String?
+
+  rank   MemberRank
+  status MemberStatus @default(ACTIVE)
+
+  joinedTtpAt          DateTime  @default(now())
+  leftTtpAt            DateTime?
+  recruitedByDiscordId String?
+  notes                String?
+
+  /// Contatore per il locking ottimistico: ogni mutazione di rank/status lo
+  /// incrementa e verifica il valore atteso. Due promote concorrenti sullo
+  /// stesso stato iniziale non possono quindi comporsi.
+  version Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile      DiscordProfile      @relation(fields: [discordId], references: [discordId], onDelete: Cascade)
+  specialRoles MemberSpecialRole[]
+  history      MemberHistory[]
+
+  @@index([status, rank])
+  @@index([rank])
+  @@map("members")
+}
+
+/// Assegnazione storicizzata di un ruolo speciale (badge o specializzazione).
+model MemberSpecialRole {
+  id       String      @id @default(cuid())
+  memberId String
+  role     SpecialRole
+
+  /// Sentinella per "al massimo un'assegnazione attiva per (membro, ruolo)":
+  /// vale `<memberId>:<role>` finche' attiva, poi NULL.
+  activeKey String? @unique
+
+  assignedAt          DateTime  @default(now())
+  assignedByDiscordId String?
+  removedAt           DateTime?
+  removedByDiscordId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, role])
+  @@map("member_special_roles")
+}
+
+/// Eventi significativi nella vita di un membro. Sola aggiunta, mai modifica.
+model MemberHistory {
+  id        String             @id @default(cuid())
+  memberId  String
+  discordId String
+  event     MemberHistoryEvent
+
+  fromRank   MemberRank?
+  toRank     MemberRank?
+  fromStatus MemberStatus?
+  toStatus   MemberStatus?
+
+  specialRole    SpecialRole?
+  actorDiscordId String?
+  reason         String?
+
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+  @@index([discordId, createdAt])
+  @@map("member_history")
+}
+
+/// Blacklist. E' il DB a essere autorevole, NON il ruolo Discord `Banned`.
+/// Nessuna foreign key verso `DiscordProfile`: si deve poter blacklistare un
+/// ID che non e' mai entrato nel server.
+model BlacklistEntry {
+  id        String @id @default(cuid())
+  discordId String
+
+  rpName    String?
+  rpSurname String?
+  reason    String
+  notes     String?
+
+  active Boolean @default(true)
+
+  /// Sentinella per "al massimo una entry attiva per Discord ID":
+  /// vale `discordId` finche' attiva, poi NULL.
+  activeKey String? @unique
+
+  createdByDiscordId String
+  createdAt          DateTime  @default(now())
+  removedByDiscordId String?
+  removedAt          DateTime?
+  removeReason       String?
+
+  updatedAt DateTime @updatedAt
+
+  @@index([discordId, active])
+  @@index([active, createdAt])
+  @@map("blacklist_entries")
+}
+
+/// Audit amministrativo. Sola aggiunta.
+/// Nessuna foreign key: l'audit non deve MAI fallire per un vincolo
+/// referenziale, nemmeno se l'entita' collegata non esiste piu'.
+model AuditLog {
+  id     String      @id @default(cuid())
+  action AuditAction
+
+  actorDiscordId  String?
+  targetDiscordId String?
+
+  entityType String?
+  entityId   String?
+
+  previousValue String?
+  newValue      String?
+  reason        String?
+  metadata      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([targetDiscordId, createdAt])
+  @@index([actorDiscordId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// Configurazione e policy runtime della guild.
+/// Evita di spargere flag di comportamento nel codice o nell'env.
+model GuildConfig {
+  guildId String @id
+
+  /// --- Policy di authorization (vedi src/config/permissions.ts) ---
+  bigCanManageBig              Boolean @default(false)
+  bigCanPromoteToLeadership    Boolean @default(false)
+  bigCanBlacklist              Boolean @default(true)
+  bigCanUseControlPanel        Boolean @default(true)
+  youngOgCanReviewApplications Boolean @default(false)
+
+  /// --- Policy di blacklist ---
+  /// Nessuna azione distruttiva automatica di default.
+  blacklistAutoKick Boolean @default(false)
+  blacklistAutoBan  Boolean @default(false)
+
+  /// --- Policy di membership ---
+  /// Rimuovere badge e specializzazioni quando si lascia la gang.
+  removeSpecialRolesOnLeave  Boolean @default(true)
+  /// Rimuovere Friend/Mafia quando si entra nella gang.
+  removeCommunityRolesOnJoin Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("guild_configs")
+}
+
+/// Pannello persistente gia' pubblicato. Serve a NON duplicare i pannelli a
+/// ogni restart: si riusa il messaggio esistente e lo si ricrea solo se
+/// e' stato cancellato.
+model PersistentPanel {
+  id        String    @id @default(cuid())
+  guildId   String
+  channelId String
+  messageId String
+  panelType PanelType
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([guildId, panelType])
+  @@map("persistent_panels")
 }

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Typecheck · Lint · Format · Test · Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `--ignore-scripts` salta il postinstall: `prisma generate` viene
+      # eseguito subito dopo, quando lo schema è disponibile.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Nessun database richiesto: `generate` legge solo lo schema.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx tsc -p tsconfig.json
+
+      # Le vulnerabilità solo-dev non bloccano la pipeline: `--omit=dev`
+      # controlla ciò che finisce davvero in produzione.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

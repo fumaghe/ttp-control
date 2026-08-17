@@ -1,0 +1,44 @@
+# Secret: non devono MAI finire nell'immagine.
+.env
+.env.*
+!.env.example
+
+# Dipendenze e build: ricostruiti dentro l'immagine.
+node_modules/
+dist/
+coverage/
+src/generated/
+
+# Git e CI
+.git/
+.github/
+.gitignore
+
+# Sviluppo
+tests/
+scripts/
+*.test.ts
+eslint.config.js
+prettier.config.js
+.prettierignore
+tsconfig.tools.json
+vitest.config.ts
+
+# Documentazione
+README.md
+*.md
+
+# Editor e OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Log
+*.log
+logs/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

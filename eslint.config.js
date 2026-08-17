@@ -84,6 +84,14 @@ export default defineConfig([
   },
 
   {
+    // I test double implementano interfacce che restituiscono Promise, ma il
+    // loro corpo e' sincrono: `require-await` qui segnalerebbe solo il fatto
+    // che non c'e' I/O, che e' esattamente il punto di un doppio in memoria.
+    files: ['tests/support/**/*.ts'],
+    rules: { '@typescript-eslint/require-await': 'off' },
+  },
+
+  {
     // I file di configurazione .js di root non sono coperti da un tsconfig:
     // niente regole type-aware su di loro.
     files: ['**/*.js'],
