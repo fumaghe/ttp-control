@@ -1,0 +1,56 @@
+# --- Dependencies ---
+node_modules/
+.pnp/
+.pnp.js
+
+# --- Build output ---
+dist/
+build/
+*.tsbuildinfo
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Logs ---
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Database (never commit the DB) ---
+prisma/*.db
+prisma/*.db-journal
+prisma/*.sqlite
+prisma/*.sqlite3
+data/
+backups/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Prisma generated client ---
+src/generated/
+
+# --- Test / coverage ---
+coverage/
+.nyc_output/
+
+# --- Tooling caches ---
+.eslintcache
+.cache/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo

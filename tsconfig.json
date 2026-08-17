@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    /* Language & environment ------------------------------------------------ */
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "moduleDetection": "force",
+    /* Declared explicitly: automatic `@types/*` discovery is not something we
+       want to depend on, and every entry point here needs Node globals. */
+    "types": ["node"],
+
+    /* Emit ------------------------------------------------------------------ */
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "removeComments": false,
+    "newLine": "lf",
+
+    /* Type checking — strict on purpose. This is a management system, not a
+       throwaway bot; we want the compiler to catch bad state transitions. --- */
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+
+    /* Interop --------------------------------------------------------------- */
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

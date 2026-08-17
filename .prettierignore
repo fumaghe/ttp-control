@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+data/
+backups/
+src/generated/
+prisma/migrations/
+package-lock.json
+*.db
+*.log
