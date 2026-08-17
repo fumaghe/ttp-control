@@ -23,7 +23,7 @@ generator client {
   provider            = "prisma-client"
   output              = "../src/generated/prisma"
   moduleFormat        = "esm"
-  runtime             = "nodejs"
+  runtime             = "workerd"
   importFileExtension = "js"
 }
 
@@ -385,6 +385,45 @@ model GuildConfig {
   updatedAt DateTime @updatedAt
 
   @@map("guild_configs")
+}
+
+/// Fotografia dello stato Discord di un membro, per la riconciliazione.
+///
+/// Senza Gateway persistente non esistono piu' `guildMemberAdd`,
+/// `guildMemberRemove` e `guildMemberUpdate`: il Cron Trigger confronta lo
+/// stato attuale della guild con queste righe e ne DEDUCE gli stessi eventi.
+///
+/// NON duplica `DiscordProfile`: quello e' l'anagrafica applicativa
+/// (username, verifica), questo e' lo stato Discord grezzo al solo scopo di
+/// calcolare un diff. Sono due cose diverse e cambiano per motivi diversi.
+model GuildMemberSnapshot {
+  id        String @id @default(cuid())
+  guildId   String
+  discordId String
+
+  /// `false` quando il membro non compare piu' nell'enumerazione.
+  /// La riga NON viene cancellata: serve a riconoscere un rientro.
+  inGuild Boolean @default(true)
+
+  /// Ruoli posseduti all'ultima osservazione.
+  roleIds String[]
+  /// Impronta stabile di `roleIds`: confronto in O(1) senza rileggere l'array.
+  rolesHash String
+  /// Nickname/display name all'ultima osservazione, per i log.
+  nickname  String?
+
+  joinedAt         DateTime?
+  firstSeenAt      DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  leftAt           DateTime?
+  lastReconciledAt DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([guildId, discordId])
+  @@index([guildId, inGuild])
+  @@map("guild_member_snapshots")
 }
 
 /// Pannello persistente gia' pubblicato. Serve a NON duplicare i pannelli a

@@ -5,7 +5,7 @@
  * e il contesto restano nei log. Nessun dettaglio interno viene mai esposto
  * su Discord.
  */
-import type { RepliableInteraction } from 'discord.js';
+import type { InteractionContext } from '../http/interactionContext.js';
 import { AppError, ERROR_CODE, isAppError } from './AppError.js';
 import { errorEmbed } from '../components/embeds/base.js';
 import { createLogger } from '../utils/logger.js';
@@ -21,7 +21,7 @@ export interface ErrorContext {
 }
 
 export async function handleInteractionError(
-  interaction: RepliableInteraction,
+  interaction: InteractionContext,
   error: unknown,
   context: ErrorContext,
 ): Promise<void> {

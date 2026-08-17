@@ -1,7 +1,9 @@
 /**
  * Control panel della Leadership.
  */
-import { ActionRowBuilder, type BaseMessageOptions, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder } from '@discordjs/builders';
+import { ButtonStyle } from 'discord-api-types/v10';
+import type { MessagePayload } from '../../discord/payload.js';
 import { RANK_LABEL, RANK_ORDER } from '../../config/constants.js';
 import type { DashboardStats } from '../../services/statsService.js';
 import { buildCustomId } from '../../utils/customId.js';
@@ -36,7 +38,7 @@ export function buildStatsBlock(stats: DashboardStats): string {
   ].join('\n');
 }
 
-export function buildControlPanel(stats: DashboardStats): BaseMessageOptions {
+export function buildControlPanel(stats: DashboardStats): MessagePayload {
   const embed = brandEmbed('MANAGEMENT SYSTEM')
     .setDescription(buildStatsBlock(stats))
     .addFields({
@@ -55,17 +57,17 @@ export function buildControlPanel(stats: DashboardStats): BaseMessageOptions {
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.members)
         .setLabel('MEMBERS')
-        .setEmoji('👥')
+        .setEmoji({ name: '👥' })
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.community)
         .setLabel('COMMUNITY')
-        .setEmoji('🏙')
+        .setEmoji({ name: '🏙' })
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.roster)
         .setLabel('ROSTER')
-        .setEmoji('📋')
+        .setEmoji({ name: '📋' })
         .setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -76,24 +78,24 @@ export function buildControlPanel(stats: DashboardStats): BaseMessageOptions {
             ? `TTP REQUESTS (${stats.pendingApplications})`
             : 'TTP REQUESTS',
         )
-        .setEmoji('📨')
+        .setEmoji({ name: '📨' })
         .setStyle(stats.pendingApplications > 0 ? ButtonStyle.Success : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.search)
         .setLabel('SEARCH')
-        .setEmoji('🔍')
+        .setEmoji({ name: '🔍' })
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.blacklist)
         .setLabel('BLACKLIST')
-        .setEmoji('🚫')
+        .setEmoji({ name: '🚫' })
         .setStyle(ButtonStyle.Danger),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(PANEL_BUTTONS.refresh)
         .setLabel('Aggiorna')
-        .setEmoji('🔄')
+        .setEmoji({ name: '🔄' })
         .setStyle(ButtonStyle.Secondary),
     ),
   ];

@@ -4,13 +4,8 @@
  * Ogni azione ricontrolla i permessi: i bottoni sono stati costruiti in
  * passato, ma il permesso deve valere adesso.
  */
-import {
-  ActionRowBuilder,
-  ModalBuilder,
-  type ModalSubmitInteraction,
-  StringSelectMenuBuilder,
-  TextInputStyle,
-} from 'discord.js';
+import { ActionRowBuilder, ModalBuilder, StringSelectMenuBuilder } from '@discordjs/builders';
+import { TextInputStyle } from 'discord-api-types/v10';
 import { SpecialRole } from '../../generated/prisma/enums.js';
 import { RANK_LABEL, RANK_ORDER } from '../../config/constants.js';
 import { AppError, ERROR_CODE } from '../../errors/AppError.js';
@@ -18,7 +13,6 @@ import { handleInteractionError } from '../../errors/handleInteractionError.js';
 import { SPECIAL_ROLE_LABEL, STATUS_LABEL } from '../../components/embeds/memberCard.js';
 import { infoEmbed, mention, successEmbed, warningEmbed } from '../../components/embeds/base.js';
 import type { ComponentHandler, ModalHandler } from '../../types/command.js';
-import type { AppContext } from '../../types/context.js';
 import { textField } from '../../components/modals/fields.js';
 import { buildCustomId, requireArg } from '../../utils/customId.js';
 import { defer, respond } from '../../utils/respond.js';
@@ -134,7 +128,7 @@ export const memberButtonHandler: ComponentHandler = {
               : 'member.remove';
         await ctx.authorization.requireOn(actor, target, operation);
 
-        await interaction.showModal(reasonModal(parsed.action, targetId, reasonTitle));
+        await interaction.responder.showModal(reasonModal(parsed.action, targetId, reasonTitle));
       } catch (error) {
         await handleInteractionError(interaction, error, {
           operation: `button:member:${parsed.action}`,
@@ -156,7 +150,7 @@ export const memberButtonHandler: ComponentHandler = {
 
         const member = await ctx.members.requireInGang(targetId);
 
-        await interaction.showModal(
+        await interaction.responder.showModal(
           new ModalBuilder()
             .setCustomId(buildCustomId('member', 'notesSubmit', targetId))
             .setTitle('Note della Leadership')
@@ -263,7 +257,7 @@ export const memberButtonHandler: ComponentHandler = {
 export const memberModalHandler: ModalHandler = {
   namespace: 'member',
 
-  async handle(interaction: ModalSubmitInteraction, parsed, ctx: AppContext): Promise<void> {
+  async handle(interaction, parsed, ctx): Promise<void> {
     await defer(interaction, { ephemeral: true });
 
     const actorId = interaction.user.id;

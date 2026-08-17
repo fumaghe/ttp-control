@@ -4,7 +4,8 @@
  * `makettp` non reimplementa nulla: chiama lo stesso `memberService.addToGang`
  * usato da `/member add` e dall'approvazione delle candidature.
  */
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { MemberRank } from '../generated/prisma/enums.js';
 import { RANK_LABEL, RANK_ORDER } from '../config/constants.js';
 import {

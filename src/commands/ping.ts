@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
 import { pingDatabase } from '../database/prisma.js';
 import { BOT_NAME, BOT_VERSION, EMBED_COLOR } from '../config/constants.js';
 import { neutralEmbed } from '../components/embeds/base.js';
@@ -20,9 +20,16 @@ function formatUptime(since: Date): string {
 /**
  * Health check operativo.
  *
- * Mostra latenza gateway, stato del database e uptime. Volutamente NON
- * espone host, versioni o connection string: sono informazioni utili solo a
- * chi vuole attaccare il sistema.
+ * Non c'è più una latenza "gateway" da mostrare: senza connessione
+ * persistente si misura invece un round-trip REST verso Discord, che è
+ * l'unico canale che il bot usa davvero.
+ *
+ * L'uptime è quello dell'ISOLATE del Worker, non del bot: su Cloudflare non
+ * esiste un processo che resta acceso, e fingere il contrario darebbe un
+ * numero senza significato.
+ *
+ * Volutamente NON espone host, versioni o connection string: sono
+ * informazioni utili solo a chi vuole attaccare il sistema.
  */
 export const pingCommand: SlashCommand = {
   name: 'ping',
@@ -33,21 +40,32 @@ export const pingCommand: SlashCommand = {
     .toJSON(),
 
   async execute(interaction, ctx): Promise<void> {
-    const database = await pingDatabase(ctx.db);
-    const gatewayMs = Math.max(ctx.client.ws.ping, 0);
+    const startedAt = Date.now();
+    const [database, discordOk] = await Promise.all([
+      pingDatabase(ctx.db),
+      ctx.gateway
+        .getSelfMember()
+        .then(() => true)
+        .catch(() => false),
+    ]);
+    const discordMs = Date.now() - startedAt;
 
     const embed = neutralEmbed(`${BOT_NAME} · online`)
-      .setColor(database.ok ? EMBED_COLOR.success : EMBED_COLOR.danger)
+      .setColor(database.ok && discordOk ? EMBED_COLOR.success : EMBED_COLOR.danger)
       .addFields(
-        { name: 'Gateway', value: `${gatewayMs} ms`, inline: true },
+        {
+          name: 'Discord API',
+          value: discordOk ? `🟢 ${discordMs} ms` : '🔴 non raggiungibile',
+          inline: true,
+        },
         {
           name: 'Database',
           value: database.ok ? `🟢 ${database.latencyMs} ms` : '🔴 non raggiungibile',
           inline: true,
         },
-        { name: 'Uptime', value: formatUptime(ctx.startedAt), inline: true },
+        { name: 'Isolate', value: formatUptime(ctx.startedAt), inline: true },
       )
-      .setFooter({ text: `v${BOT_VERSION}` });
+      .setFooter({ text: `v${BOT_VERSION} · Cloudflare Workers` });
 
     await respond(interaction, { embeds: [embed] });
   },

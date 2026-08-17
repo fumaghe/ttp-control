@@ -1,15 +1,12 @@
 /**
  * Contratti per comandi e handler di interaction.
+ *
+ * Nessun tipo di discord.js: gli handler ricevono `InteractionContext`, il
+ * DTO applicativo. La business logic non sa da quale trasporto sia arrivata
+ * l'interaction.
  */
-import type {
-  AutocompleteInteraction,
-  ButtonInteraction,
-  ChatInputCommandInteraction,
-  ModalSubmitInteraction,
-  RESTPostAPIChatInputApplicationCommandsJSONBody,
-  StringSelectMenuInteraction,
-  UserSelectMenuInteraction,
-} from 'discord.js';
+import type { RESTPostAPIChatInputApplicationCommandsJSONBody } from 'discord-api-types/v10';
+import type { InteractionContext } from '../http/interactionContext.js';
 import type { ParsedCustomId } from '../utils/customId.js';
 import type { AppContext } from './context.js';
 
@@ -18,24 +15,17 @@ export interface SlashCommand {
   readonly name: string;
   /** Payload gia' serializzato per la registrazione. */
   readonly data: RESTPostAPIChatInputApplicationCommandsJSONBody;
-  execute(interaction: ChatInputCommandInteraction, ctx: AppContext): Promise<void>;
-  autocomplete?(interaction: AutocompleteInteraction, ctx: AppContext): Promise<void>;
+  execute(interaction: InteractionContext, ctx: AppContext): Promise<void>;
+  autocomplete?(interaction: InteractionContext, ctx: AppContext): Promise<void>;
 }
-
-export type ComponentInteraction =
-  ButtonInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction;
 
 export interface ComponentHandler {
   /** Namespace del `customId` gestito. */
   readonly namespace: string;
-  handle(interaction: ComponentInteraction, parsed: ParsedCustomId, ctx: AppContext): Promise<void>;
+  handle(interaction: InteractionContext, parsed: ParsedCustomId, ctx: AppContext): Promise<void>;
 }
 
 export interface ModalHandler {
   readonly namespace: string;
-  handle(
-    interaction: ModalSubmitInteraction,
-    parsed: ParsedCustomId,
-    ctx: AppContext,
-  ): Promise<void>;
+  handle(interaction: InteractionContext, parsed: ParsedCustomId, ctx: AppContext): Promise<void>;
 }

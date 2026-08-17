@@ -4,11 +4,15 @@
  * Registrazione per-guild e non globale: la propagazione è immediata,
  * mentre i comandi globali possono richiedere fino a un'ora.
  *
+ * Usa lo stesso client REST del Worker: nessun Gateway, nessun processo
+ * persistente, solo una PUT autenticata col bot token.
+ *
  *   npm run commands:deploy
  */
-import { REST, Routes } from 'discord.js';
+import 'dotenv/config';
 import { loadEnv, EnvironmentError } from '../src/config/env.js';
-import { commandPayloads, commands } from '../src/client/registry.js';
+import { createDiscordRest } from '../src/discord/rest.js';
+import { commandPayloads, commands } from '../src/interactions/registry.js';
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -19,11 +23,12 @@ async function main(): Promise<void> {
     console.log(`  • /${command.name}`);
   }
 
-  const rest = new REST({ version: '10' }).setToken(env.discordToken);
+  const rest = createDiscordRest({ token: env.discordToken });
 
-  const result = (await rest.put(Routes.applicationGuildCommands(env.clientId, env.guildId), {
-    body: payloads,
-  })) as unknown[];
+  const result = await rest.put<unknown[]>(
+    `/applications/${env.clientId}/guilds/${env.guildId}/commands`,
+    payloads,
+  );
 
   console.log(`\n✅ ${result.length} comandi registrati.`);
   console.log('Sono già disponibili nel server: la registrazione per-guild è immediata.');

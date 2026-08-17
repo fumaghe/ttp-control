@@ -7,7 +7,7 @@ on:
 
 jobs:
   check:
-    name: Typecheck · Lint · Format · Test · Build
+    name: Typecheck · Lint · Format · Test · Worker build
     runs-on: ubuntu-latest
 
     steps:
@@ -24,9 +24,16 @@ jobs:
         run: npm ci --ignore-scripts
 
       # Nessun database richiesto: `generate` legge solo lo schema.
+      # Genera il client per la runtime `workerd`, wasm del query compiler
+      # incluso: senza, né il typecheck né il bundle possono funzionare.
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      # Due progetti: codice condiviso + script sotto i tipi Node, Worker
+      # sotto i tipi Cloudflare.
       - name: Typecheck
         run: npm run typecheck
 
@@ -39,8 +46,24 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npx tsc -p tsconfig.json
+      # Bundle validation del Worker: esegue lo stesso build del deploy senza
+      # pubblicare nulla e senza bisogno di credenziali Cloudflare.
+      - name: Worker bundle validation
+        run: npx wrangler deploy --dry-run --outdir dist/worker
+
+      # Il piano gratuito Workers ha un limite di 3 MiB compressi: se il
+      # bundle lo supera, il deploy fallisce. Meglio accorgersene qui.
+      - name: Check bundle size
+        run: |
+          SIZE=$(gzip -9 -c dist/worker/index.js | wc -c)
+          WASM=$(find dist/worker -name '*.wasm' -exec sh -c 'gzip -9 -c "$1" | wc -c' _ {} \; | paste -sd+ | bc)
+          TOTAL=$(( SIZE + ${WASM:-0} ))
+          LIMIT=$(( 3 * 1024 * 1024 ))
+          echo "Bundle compresso: $TOTAL byte (limite piano gratuito: $LIMIT)"
+          if [ "$TOTAL" -gt "$LIMIT" ]; then
+            echo "::error::Il bundle supera il limite del piano gratuito Workers"
+            exit 1
+          fi
 
       # Le vulnerabilità solo-dev non bloccano la pipeline: `--omit=dev`
       # controlla ciò che finisce davvero in produzione.

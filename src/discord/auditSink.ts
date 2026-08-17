@@ -1,16 +1,17 @@
 /**
- * Consegna dei log di audit sui canali Discord.
+ * Consegna dei log di audit sui canali Discord, via REST.
  *
  * Ogni metodo puo' fallire senza conseguenze: `auditService` cattura gli
  * errori e li registra, perche' un log non consegnato non deve invalidare
  * un'operazione gia' completata.
  */
-import { type Client, EmbedBuilder } from 'discord.js';
+import { EmbedBuilder } from '@discordjs/builders';
 import { AuditAction } from '../generated/prisma/enums.js';
 import type { ChannelRegistry } from '../config/channels.js';
 import { EMBED_COLOR } from '../config/constants.js';
 import type { AuditEntry, AuditSink } from '../services/auditService.js';
 import { escapeMarkdown, mention, truncate } from '../components/embeds/base.js';
+import type { DiscordGateway } from './gateway.js';
 
 /** Etichetta leggibile per ciascuna azione. */
 const ACTION_LABEL: Record<AuditAction, string> = {
@@ -56,7 +57,7 @@ const ALARMING: ReadonlySet<AuditAction> = new Set([
   AuditAction.BLACKLISTED_USER_REJOINED,
 ]);
 
-function buildEmbed(entry: AuditEntry): EmbedBuilder {
+export function buildAuditEmbed(entry: AuditEntry): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setTitle(ACTION_LABEL[entry.action])
     .setColor(ALARMING.has(entry.action) ? EMBED_COLOR.danger : EMBED_COLOR.neutral)
@@ -90,15 +91,13 @@ function buildEmbed(entry: AuditEntry): EmbedBuilder {
 }
 
 export function createDiscordAuditSink(deps: {
-  client: Client<true>;
+  gateway: DiscordGateway;
   channels: ChannelRegistry;
 }): AuditSink {
-  const { client, channels } = deps;
+  const { gateway, channels } = deps;
 
   async function send(channelId: string, entry: AuditEntry): Promise<void> {
-    const channel = await client.channels.fetch(channelId);
-    if (!channel?.isSendable()) return;
-    await channel.send({ embeds: [buildEmbed(entry)] });
+    await gateway.sendMessage(channelId, { embeds: [buildAuditEmbed(entry)] });
   }
 
   return {

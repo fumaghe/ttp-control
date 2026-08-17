@@ -4,7 +4,7 @@
  * Tenere qui la presentazione evita che ogni handler reinventi colori,
  * intestazioni e formattazione delle date.
  */
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder } from '@discordjs/builders';
 import { DISCORD_LIMITS, EMBED_COLOR, GANG_NAME } from '../../config/constants.js';
 
 /** Data in formato italiano: `17/08/2026`. */

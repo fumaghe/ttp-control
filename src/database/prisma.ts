@@ -1,14 +1,18 @@
 /**
- * Prisma Client + driver adapter PostgreSQL.
+ * Prisma Client + driver adapter PostgreSQL, sulla runtime dei Worker.
  *
- * In Prisma 7 il client richiede un driver adapter esplicito. Usiamo
- * `@prisma/adapter-pg` (driver `pg` su TCP) perche' il bot e' un processo
- * long-running: un pool di connessioni reali e' la scelta corretta.
- * `@prisma/adapter-neon` (WebSocket) avrebbe senso solo su serverless/edge.
+ * SCELTA TECNICA (vedi anche README → "Database su Cloudflare"):
+ * Prisma 7 con `@prisma/adapter-pg` e il client generato per `workerd`. Il
+ * generatore emette un query compiler WebAssembly che wrangler impacchetta
+ * come modulo: nessuna compilazione WASM a runtime, che su Workers sarebbe
+ * vietata. È il percorso documentato da Prisma per Cloudflare ed è quello
+ * che permette di NON riscrivere il repository layer: schema, migration e
+ * query restano identici alla V1.
  *
- * La connection string e' quella POOLED di Neon: il pooler regge molte
- * connessioni brevi ed e' l'endpoint giusto per il runtime. Le migration
- * usano invece l'endpoint diretto, configurato in `prisma.config.ts`.
+ * CICLO DI VITA: un client PER INVOCAZIONE, non un singleton di modulo.
+ * Su Workers gli oggetti di I/O non possono attraversare due richieste
+ * diverse: un pool tenuto a livello di modulo verrebbe rifiutato dalla
+ * runtime. Il pooling vero lo fa Hyperdrive, davanti a Neon.
  */
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
@@ -19,8 +23,6 @@ const log = createLogger('database');
 
 export type Database = PrismaClient;
 
-let client: PrismaClient | undefined;
-
 export interface DatabaseOptions {
   readonly databaseUrl: string;
   /** Log delle query: utile in sviluppo, rumoroso e costoso in produzione. */
@@ -28,11 +30,15 @@ export interface DatabaseOptions {
 }
 
 /**
- * Crea il Prisma Client. Va chiamata una volta sola allo startup;
- * il risultato viene riusato da `getDatabase()`.
+ * Crea un Prisma Client. Da chiamare una volta per invocazione del Worker.
+ *
+ * Il pool `pg` viene dimensionato a una sola connessione: davanti c'è
+ * Hyperdrive, che gestisce lui il pooling verso Neon. Aprire più connessioni
+ * per invocazione consumerebbe quota senza servire a nulla, dato che una
+ * singola interaction esegue query in sequenza.
  */
 export function createDatabase(options: DatabaseOptions): PrismaClient {
-  const adapter = new PrismaPg({ connectionString: options.databaseUrl });
+  const adapter = new PrismaPg({ connectionString: options.databaseUrl, max: 1 });
 
   const prisma = new PrismaClient({
     adapter,
@@ -60,28 +66,17 @@ export function createDatabase(options: DatabaseOptions): PrismaClient {
     log.error({ target: event.target }, event.message);
   });
 
-  client = prisma;
   return prisma;
 }
 
-/** Il client gia' creato. Errore esplicito se lo startup non l'ha inizializzato. */
-export function getDatabase(): PrismaClient {
-  if (!client) {
-    throw new Error('Database non inizializzato: chiama createDatabase() allo startup.');
-  }
-  return client;
-}
-
-/** Oltre questa soglia lo startup fallisce invece di restare appeso. */
-const CONNECT_TIMEOUT_MS = 15_000;
+/** Oltre questa soglia il controllo di raggiungibilita' fallisce. */
+const CONNECT_TIMEOUT_MS = 10_000;
 
 /**
  * Verifica che il database risponda davvero.
  *
- * Il timeout esplicito e' importante: senza, un problema di rete o un
- * security group chiuso lascerebbero il processo bloccato per sempre in
- * avvio, senza log e senza che il process manager se ne accorga. Meglio un
- * crash immediato e un restart.
+ * Il timeout esplicito e' importante: senza, un problema di rete lascerebbe
+ * l'invocazione appesa fino al limite della runtime. Meglio un errore chiaro.
  *
  * Logga solo `host/database`: mai la connection string completa.
  */
@@ -91,13 +86,13 @@ export async function connectDatabase(
 ): Promise<{ latencyMs: number }> {
   const startedAt = Date.now();
 
-  let timer: NodeJS.Timeout | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       reject(
         new Error(
           `Database non raggiungibile entro ${CONNECT_TIMEOUT_MS / 1000}s (${sanitizeDatabaseUrl(databaseUrl)}). ` +
-            'Controlla DATABASE_URL, lo stato del progetto Neon e la connettività di rete.',
+            'Controlla la configurazione Hyperdrive/DATABASE_URL e lo stato del progetto Neon.',
         ),
       );
     }, CONNECT_TIMEOUT_MS);
@@ -127,9 +122,18 @@ export async function pingDatabase(
   }
 }
 
-export async function disconnectDatabase(): Promise<void> {
-  if (!client) return;
-  await client.$disconnect();
-  client = undefined;
-  log.info('Database disconnesso');
+/**
+ * Chiude le connessioni.
+ *
+ * Va passata a `ctx.waitUntil()`: la risposta all'utente non deve aspettare
+ * la chiusura del pool, ma il pool non deve nemmeno restare aperto.
+ */
+export async function disconnectDatabase(prisma: PrismaClient): Promise<void> {
+  try {
+    await prisma.$disconnect();
+  } catch (error) {
+    // Una disconnessione fallita non ha nessuna conseguenza per l'utente:
+    // l'isolate viene comunque riciclato.
+    log.debug({ err: error }, 'Disconnessione del database non riuscita');
+  }
 }

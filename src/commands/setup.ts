@@ -3,16 +3,17 @@
  *
  * Diagnostica concreta: non "qualcosa non va", ma esattamente quale ruolo il
  * bot non riesce a gestire e cosa fare per risolverlo.
+ *
+ * Tutto passa da REST: non esiste più una cache della guild da interrogare,
+ * e non c'è più nessuna "connessione Gateway" da verificare. Al suo posto si
+ * controlla che l'API Discord risponda davvero.
  */
-import {
-  ChannelType,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
-  type GuildBasedChannel,
-} from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { AuditAction, PanelType } from '../generated/prisma/enums.js';
 import { EMBED_COLOR } from '../config/constants.js';
 import { pingDatabase } from '../database/prisma.js';
+import { CHANNEL_TYPE, hasPermission, PERMISSION } from '../discord/api.js';
 import { buildVerifyPanel } from '../components/embeds/verifyPanel.js';
 import { buildControlPanel } from '../components/embeds/controlPanel.js';
 import { brandEmbed, successEmbed, truncate } from '../components/embeds/base.js';
@@ -34,31 +35,50 @@ const ICON: Record<CheckStatus, string> = { ok: '✅', warn: '⚠️', fail: '�
 
 /** Permessi realmente necessari. `Administrator` NON è tra questi. */
 const REQUIRED_GUILD_PERMISSIONS = [
-  { flag: PermissionFlagsBits.ManageRoles, label: 'Manage Roles' },
-  { flag: PermissionFlagsBits.ManageNicknames, label: 'Manage Nicknames' },
+  { flag: PERMISSION.MANAGE_ROLES, label: 'Manage Roles' },
+  { flag: PERMISSION.MANAGE_NICKNAMES, label: 'Manage Nicknames' },
 ] as const;
 
 const REQUIRED_CHANNEL_PERMISSIONS = [
-  { flag: PermissionFlagsBits.ViewChannel, label: 'View Channel' },
-  { flag: PermissionFlagsBits.SendMessages, label: 'Send Messages' },
-  { flag: PermissionFlagsBits.EmbedLinks, label: 'Embed Links' },
-  { flag: PermissionFlagsBits.ReadMessageHistory, label: 'Read Message History' },
+  { flag: PERMISSION.VIEW_CHANNEL, label: 'View Channel' },
+  { flag: PERMISSION.SEND_MESSAGES, label: 'Send Messages' },
+  { flag: PERMISSION.EMBED_LINKS, label: 'Embed Links' },
+  { flag: PERMISSION.READ_MESSAGE_HISTORY, label: 'Read Message History' },
 ] as const;
 
-async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
-  const results: CheckResult[] = [];
-  const { guild } = ctx;
+const TEXT_CHANNEL_TYPES: readonly number[] = [
+  CHANNEL_TYPE.GUILD_TEXT,
+  CHANNEL_TYPE.GUILD_ANNOUNCEMENT,
+];
 
-  // --- Guild ---------------------------------------------------------------
-  results.push(
-    guild.id === ctx.env.guildId
-      ? { label: 'Guild', status: 'ok' }
-      : {
-          label: 'Guild',
-          status: 'fail',
-          detail: `GUILD_ID nel .env (${ctx.env.guildId}) non corrisponde a questo server (${guild.id}).`,
-        },
-  );
+export async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+
+  // --- Discord API + guild --------------------------------------------------
+  // Sostituisce il controllo sulla connessione Gateway della V1: quello che
+  // conta ora è che l'API risponda e che sia la guild giusta.
+  let guildReachable = true;
+  try {
+    const guild = await ctx.gateway.getGuild();
+    results.push({ label: `Discord API (${guild.name})`, status: 'ok' });
+    results.push(
+      guild.id === ctx.env.guildId
+        ? { label: 'Guild', status: 'ok' }
+        : {
+            label: 'Guild',
+            status: 'fail',
+            detail: `GUILD_ID configurato (${ctx.env.guildId}) non corrisponde a questo server (${guild.id}).`,
+          },
+    );
+  } catch {
+    guildReachable = false;
+    results.push({
+      label: 'Discord API',
+      status: 'fail',
+      detail:
+        'Discord non risponde, oppure il bot non è in questo server.\nControlla DISCORD_TOKEN e GUILD_ID.',
+    });
+  }
 
   // --- Database ------------------------------------------------------------
   const database = await pingDatabase(ctx.db);
@@ -69,24 +89,35 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
           label: 'Database / Neon',
           status: 'fail',
           detail:
-            'Il database non risponde. Controlla DATABASE_URL e che il progetto Neon sia attivo.',
+            'Il database non risponde. Controlla la configurazione Hyperdrive/DATABASE_URL e che il progetto Neon sia attivo.',
         },
   );
 
+  // Senza guild raggiungibile ogni controllo successivo produrrebbe solo
+  // errori a cascata che nascondono la causa vera.
+  if (!guildReachable) return results;
+
   // --- Ruoli ---------------------------------------------------------------
-  const me = guild.members.me;
+  const roles = await ctx.gateway.getRoles();
+  const rolesById = new Map(roles.map((role) => [role.id, role]));
+  const selfMember = await ctx.gateway.getSelfMember();
+  const selfHighest = Math.max(
+    0,
+    ...selfMember.roles.map((roleId) => rolesById.get(roleId)?.position ?? 0),
+  );
+
   const missingRoles: string[] = [];
   const unmanageableRoles: string[] = [];
 
   for (const descriptor of ctx.roles.all) {
-    const role = guild.roles.cache.get(descriptor.id);
+    const role = rolesById.get(descriptor.id);
     if (!role) {
       missingRoles.push(`${descriptor.label} (\`${descriptor.id}\`)`);
       continue;
     }
 
     const mustManage = ctx.roles.managed.some((m) => m.id === descriptor.id);
-    if (mustManage && me && (role.managed || me.roles.highest.comparePositionTo(role) <= 0)) {
+    if (mustManage && (role.managed || role.position >= selfHighest)) {
       unmanageableRoles.push(descriptor.label);
     }
 
@@ -97,18 +128,12 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
     results.push({
       label: 'Ruoli mancanti',
       status: 'fail',
-      detail: `Questi ruoli non esistono in questo server:\n${missingRoles.join('\n')}\n\nControlla gli ID nel \`.env\`.`,
+      detail: `Questi ruoli non esistono in questo server:\n${missingRoles.join('\n')}\n\nControlla gli ID nella configurazione.`,
     });
   }
 
   // --- Gerarchia dei ruoli --------------------------------------------------
-  if (!me) {
-    results.push({
-      label: 'Role Hierarchy',
-      status: 'fail',
-      detail: 'Impossibile leggere il membro bot nella guild.',
-    });
-  } else if (unmanageableRoles.length > 0) {
+  if (unmanageableRoles.length > 0) {
     results.push({
       label: 'Role Hierarchy',
       status: 'fail',
@@ -116,7 +141,7 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
         'TTP Control non può gestire:',
         ...unmanageableRoles.map((name) => `• **${name}**`),
         '',
-        `Sposta il ruolo **${me.roles.highest.name}** sopra questi ruoli`,
+        'Sposta il ruolo del bot sopra questi ruoli',
         'in Impostazioni server → Ruoli.',
       ].join('\n'),
     });
@@ -125,10 +150,10 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
   }
 
   // --- Permessi della guild -------------------------------------------------
+  const guildPermissions = await ctx.gateway.selfGuildPermissions();
   for (const permission of REQUIRED_GUILD_PERMISSIONS) {
-    const has = me?.permissions.has(permission.flag) ?? false;
     results.push(
-      has
+      hasPermission(guildPermissions, permission.flag)
         ? { label: permission.label, status: 'ok' }
         : {
             label: permission.label,
@@ -139,8 +164,11 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
   }
 
   // --- Canali ---------------------------------------------------------------
+  const channels = await ctx.gateway.getChannels();
+  const channelsById = new Map(channels.map((channel) => [channel.id, channel]));
+
   for (const descriptor of ctx.channels.all) {
-    const channel: GuildBasedChannel | undefined = guild.channels.cache.get(descriptor.id);
+    const channel = channelsById.get(descriptor.id);
 
     if (!channel) {
       results.push({
@@ -151,18 +179,18 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
       continue;
     }
 
-    if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
+    if (!TEXT_CHANNEL_TYPES.includes(channel.type)) {
       results.push({
         label: descriptor.label,
         status: 'fail',
-        detail: `**${channel.name}** non è un canale testuale.`,
+        detail: `**${channel.name ?? descriptor.id}** non è un canale testuale.`,
       });
       continue;
     }
 
-    const permissions = me ? channel.permissionsFor(me) : null;
+    const permissions = await ctx.gateway.selfChannelPermissions(channel.id);
     const missing = REQUIRED_CHANNEL_PERMISSIONS.filter(
-      (permission) => !permissions?.has(permission.flag),
+      (permission) => permissions === null || !hasPermission(permissions, permission.flag),
     ).map((permission) => permission.label);
 
     results.push(
@@ -171,21 +199,24 @@ async function runSystemCheck(ctx: AppContext): Promise<CheckResult[]> {
         : {
             label: descriptor.label,
             status: 'fail',
-            detail: `In **#${channel.name}** mancano: ${missing.join(', ')}.`,
+            detail: `In **#${channel.name ?? descriptor.id}** mancano: ${missing.join(', ')}.`,
           },
     );
   }
 
   // --- Intent privilegiato --------------------------------------------------
+  // `GET /guilds/{id}/members` richiede il Server Members Intent anche via
+  // REST: se l'enumerazione funziona, l'intent è attivo. È lo stesso intent
+  // da cui dipende la riconciliazione periodica.
   try {
-    await guild.members.fetch({ limit: 1 });
+    await ctx.gateway.listMembers();
     results.push({ label: 'Server Members Intent', status: 'ok' });
   } catch {
     results.push({
       label: 'Server Members Intent',
       status: 'fail',
       detail:
-        'Impossibile enumerare i membri. Attiva **Server Members Intent** nel Developer Portal → Bot → Privileged Gateway Intents.',
+        'Impossibile enumerare i membri via REST. Attiva **Server Members Intent** nel Developer Portal → Bot → Privileged Gateway Intents: serve anche senza Gateway, ed è indispensabile alla riconciliazione del cron.',
     });
   }
 

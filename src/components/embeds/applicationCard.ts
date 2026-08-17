@@ -1,13 +1,9 @@
 /**
  * Embed e bottoni delle candidature TTP, nel canale di review.
  */
-import {
-  ActionRowBuilder,
-  type BaseMessageOptions,
-  ButtonBuilder,
-  ButtonStyle,
-  type EmbedBuilder,
-} from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, type EmbedBuilder } from '@discordjs/builders';
+import { ButtonStyle } from 'discord-api-types/v10';
+import type { MessagePayload } from '../../discord/payload.js';
 import { TtpApplicationStatus } from '../../generated/prisma/enums.js';
 import { EMBED_COLOR } from '../../config/constants.js';
 import type { TtpApplication, Verification } from '../../repositories/types.js';
@@ -96,17 +92,17 @@ export function buildApplicationActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('application', 'approve', application.id))
         .setLabel('APPROVE TTP')
-        .setEmoji('✅')
+        .setEmoji({ name: '✅' })
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(buildCustomId('application', 'reject', application.id))
         .setLabel('REJECT')
-        .setEmoji('❌')
+        .setEmoji({ name: '❌' })
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(buildCustomId('application', 'blacklist', application.id))
         .setLabel('BLACKLIST')
-        .setEmoji('🚫')
+        .setEmoji({ name: '🚫' })
         .setStyle(ButtonStyle.Danger),
     ),
   ];
@@ -115,7 +111,7 @@ export function buildApplicationActions(
 export function buildApplicationMessage(
   application: TtpApplication,
   verification: Verification | null,
-): BaseMessageOptions {
+): MessagePayload {
   return {
     embeds: [buildApplicationEmbed(application, verification)],
     components: buildApplicationActions(application),

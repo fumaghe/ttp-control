@@ -6,6 +6,12 @@ dist/
 build/
 *.tsbuildinfo
 
+# Cloudflare Wrangler — stato locale di `wrangler dev`
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
 # Environment / secrets
 .env
 .env.*

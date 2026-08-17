@@ -1,89 +1,94 @@
 /**
- * Composizione dell'applicazione.
+ * Composizione dell'applicazione, lato Worker.
  *
- * Unico punto in cui i service vengono istanziati e collegati fra loro.
- * Tutto il resto riceve `AppContext` già costruito.
+ * Unico punto in cui i service vengono istanziati e collegati fra loro:
+ * l'erede diretto di `createContext` della V1, con il gateway REST al posto
+ * del client discord.js.
+ *
+ * Viene eseguito una volta per invocazione. È volutamente economico: nessuna
+ * chiamata di rete, nessuna query — solo costruzione di oggetti. Le richieste
+ * a Discord partono quando un handler le chiede davvero, il che conta sul
+ * piano gratuito.
  */
-import type { BaseMessageOptions, Client, Guild } from 'discord.js';
 import { buildChannelRegistry } from '../config/channels.js';
 import type { Env } from '../config/env.js';
 import { buildRoleRegistry } from '../config/roles.js';
 import type { Database } from '../database/prisma.js';
+import { createDiscordAuditSink } from '../discord/auditSink.js';
+import { createDiscordRestGateway, type DiscordGateway } from '../discord/gateway.js';
+import { createDiscordRest } from '../discord/rest.js';
 import { createRepositories } from '../repositories/index.js';
 import { createAuditService } from '../services/auditService.js';
 import { createAuthorizationService } from '../services/authorizationService.js';
 import { createBlacklistService } from '../services/blacklistService.js';
 import { createCommunityService } from '../services/communityService.js';
 import { createConsistencyService } from '../services/consistencyService.js';
+import { createMemberReconciliationService } from '../services/memberReconciliationService.js';
 import { createMemberService } from '../services/memberService.js';
-import { createPanelService, type PanelMessageGateway } from '../services/panelService.js';
+import { createPanelService } from '../services/panelService.js';
 import { createRoleService } from '../services/roleService.js';
 import { createStatsService } from '../services/statsService.js';
 import { createTtpApplicationService } from '../services/ttpApplicationService.js';
 import { createVerificationService } from '../services/verificationService.js';
 import { buildApplicationMessage } from '../components/embeds/applicationCard.js';
 import type { AppContext } from '../types/context.js';
-import { createLogger } from '../utils/logger.js';
-import { createDiscordAuditSink } from './discordAuditSink.js';
-import {
-  createDiscordModerationGateway,
-  createDiscordRoleGateway,
-  createMemberEnumerator,
-} from './discordRoleGateway.js';
 
-const log = createLogger('context');
+let isolateStartedAt: Date | undefined;
 
-function createPanelMessageGateway(client: Client<true>): PanelMessageGateway {
-  return {
-    async edit(channelId, messageId, payload): Promise<boolean> {
-      const channel = await client.channels.fetch(channelId).catch(() => null);
-      if (!channel?.isTextBased()) return false;
-      const message = await channel.messages.fetch(messageId).catch(() => null);
-      if (!message) return false;
-      await message.edit(payload);
-      return true;
-    },
-
-    async send(channelId, payload): Promise<string> {
-      const channel = await client.channels.fetch(channelId);
-      if (!channel?.isSendable()) {
-        throw new Error(`Il canale ${channelId} non è scrivibile dal bot`);
-      }
-      const message = await channel.send(payload);
-      return message.id;
-    },
-  };
+/**
+ * Istante in cui l'isolate ha iniziato a servire richieste.
+ *
+ * Va calcolato alla PRIMA richiesta, non all'inizializzazione del modulo:
+ * durante lo startup di un Worker l'orologio è fermo all'epoch, quindi un
+ * `new Date()` a livello di modulo darebbe il 1° gennaio 1970 — e `/ping`
+ * mostrerebbe un uptime di vent'anni.
+ */
+export function getIsolateStartedAt(): Date {
+  isolateStartedAt ??= new Date();
+  return isolateStartedAt;
 }
 
-export function createContext(deps: {
-  client: Client<true>;
-  guild: Guild;
-  env: Env;
-  db: Database;
-  startedAt: Date;
-}): AppContext {
-  const { client, guild, env, db, startedAt } = deps;
+export interface WorkerContextDeps {
+  readonly env: Env;
+  readonly db: Database;
+  /** Iniettabile nei test: default `globalThis.fetch`. */
+  readonly fetchImpl?: typeof fetch | undefined;
+}
+
+export interface WorkerContext {
+  readonly app: AppContext;
+  readonly gateway: DiscordGateway;
+}
+
+export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
+  const { env, db } = deps;
 
   const roles = buildRoleRegistry(env);
   const channels = buildChannelRegistry(env);
   const repos = createRepositories(db);
 
-  const gateway = createDiscordRoleGateway({ guild });
-  const moderation = createDiscordModerationGateway(guild);
-  const enumerator = createMemberEnumerator(guild);
-  const messages = createPanelMessageGateway(client);
+  const rest = createDiscordRest({
+    token: env.discordToken,
+    ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
+  });
+
+  const gateway = createDiscordRestGateway({
+    rest,
+    guildId: env.guildId,
+    applicationId: env.clientId,
+  });
 
   const roleService = createRoleService({ roles, gateway });
   const audit = createAuditService({
     audit: repos.audit,
-    sink: createDiscordAuditSink({ client, channels }),
+    sink: createDiscordAuditSink({ gateway, channels }),
   });
 
   const authorization = createAuthorizationService({
     repos,
     roles: roleService,
     gateway,
-    guildId: guild.id,
+    guildId: env.guildId,
     ownerId: env.ownerId,
   });
 
@@ -95,7 +100,7 @@ export function createContext(deps: {
     roleRegistry: roles,
     gateway,
     audit,
-    guildId: guild.id,
+    guildId: env.guildId,
   });
 
   const applications = createTtpApplicationService({
@@ -107,18 +112,17 @@ export function createContext(deps: {
     publisher: {
       async publish(application) {
         const verificationRecord = await repos.verifications.findByDiscordId(application.discordId);
-        const payload: BaseMessageOptions = buildApplicationMessage(
-          application,
-          verificationRecord,
+        const messageId = await gateway.sendMessage(
+          channels.ttpRequests,
+          buildApplicationMessage(application, verificationRecord),
         );
-        const messageId = await messages.send(channels.ttpRequests, payload);
         return { channelId: channels.ttpRequests, messageId };
       },
 
       async markResolved(application) {
         if (!application.channelId || !application.messageId) return;
         const verificationRecord = await repos.verifications.findByDiscordId(application.discordId);
-        await messages.edit(
+        await gateway.editMessage(
           application.channelId,
           application.messageId,
           buildApplicationMessage(application, verificationRecord),
@@ -132,8 +136,8 @@ export function createContext(deps: {
     roles: roleService,
     gateway,
     audit,
-    moderation,
-    guildId: guild.id,
+    moderation: gateway,
+    guildId: env.guildId,
   });
 
   const community = createCommunityService({
@@ -146,28 +150,37 @@ export function createContext(deps: {
     verifiedRoleId: roles.verified,
     friendRoleId: roles.friend,
     mafiaRoleId: roles.mafia,
-    listGuildMembersWithRoles: (roleIds) => enumerator.withAnyRole(roleIds),
+    listGuildMembersWithRoles: (roleIds) => gateway.listMembersWithAnyRole(roleIds),
   });
 
   const consistency = createConsistencyService({
     repos,
     roles: roleService,
     roleRegistry: roles,
-    listAllGuildMembers: () => enumerator.all(),
+    listAllGuildMembers: () => gateway.listMembers(),
+  });
+
+  const reconciliation = createMemberReconciliationService({
+    repos,
+    roles: roleService,
+    roleRegistry: roles,
+    audit,
+    blacklist,
+    listAllGuildMembers: () => gateway.listMembers(),
+    guildId: env.guildId,
   });
 
   const stats = createStatsService({ repos });
-  const panels = createPanelService({ panels: repos.panels, messages, guildId: guild.id });
+  const panels = createPanelService({
+    panels: repos.panels,
+    messages: gateway,
+    guildId: env.guildId,
+  });
 
-  log.info(
-    { guild: guild.name, roles: roles.all.length, channels: channels.all.length },
-    'Contesto applicativo pronto',
-  );
-
-  return {
-    client,
-    guild,
+  const app: AppContext = {
     env,
+    guildId: env.guildId,
+    applicationId: env.clientId,
     db,
     repos,
     roles,
@@ -184,8 +197,11 @@ export function createContext(deps: {
     consistency,
     stats,
     panels,
-    listAllGuildMembers: () => enumerator.all(),
-    listGuildMembersWithRoles: (roleIds) => enumerator.withAnyRole(roleIds),
-    startedAt,
+    reconciliation,
+    listAllGuildMembers: () => gateway.listMembers(),
+    listGuildMembersWithRoles: (roleIds) => gateway.listMembersWithAnyRole(roleIds),
+    startedAt: getIsolateStartedAt(),
   };
+
+  return { app, gateway };
 }

@@ -67,6 +67,9 @@ export function testEnv(): Env {
     nodeEnv: 'test',
     logLevel: 'error',
     discordToken: 'test.token.value',
+    // Chiave Ed25519 fittizia: 64 caratteri esadecimali, la forma che la
+    // validazione dell'environment pretende.
+    discordPublicKey: 'a'.repeat(64),
     clientId: '100000000000000003',
     guildId: GUILD_ID,
     ownerId: OWNER_ID,

@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
 import { MemberStatus, type MemberRank } from '../generated/prisma/enums.js';
 import { RANK_LABEL, RANK_ORDER } from '../config/constants.js';
 import { STATUS_LABEL } from '../components/embeds/memberCard.js';

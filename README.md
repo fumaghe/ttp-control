@@ -5,9 +5,16 @@ Bot Discord gestionale per la gang FiveM GTA RP **TTP — Impero**.
 Non è una raccolta di comandi scollegati: è un piccolo gestionale interno con
 audit trail, permission matrix applicativa e stato persistito su PostgreSQL.
 
-> **Stato del progetto:** V1 completa.
+> **Stato del progetto:** V2 — la stessa V1, su Cloudflare Workers.
 > Verify, candidature TTP, gestione membri, roster, community, blacklist,
-> control panel, audit, permission matrix, consistency check, deployment.
+> control panel, audit, permission matrix, consistency check.
+>
+> Il bot gira su **Discord HTTP Interactions + Cloudflare Workers + Cron
+> Triggers + Neon**: nessuna VPS, nessun processo Node persistente, piano
+> gratuito Cloudflare. La business logic è invariata rispetto alla V1 — è
+> cambiato solo come il bot viene raggiunto e come viene eseguito.
+> Il vecchio deployment Gateway/Docker resta documentato in
+> [`deployment/legacy-gateway/`](deployment/legacy-gateway/README.md).
 
 ---
 
@@ -48,12 +55,53 @@ Invarianti applicate dal sistema:
 
 ---
 
+## Architettura
+
+```text
+Discord
+   │  HTTP Interaction (POST, firmata Ed25519)
+   ▼
+Cloudflare Worker  ──────────────────────────────┐
+   │  verifica firma → 401 se non valida         │
+   ▼                                             │
+Interaction Router                               │  Cron Trigger  */5 * * * *
+   │                                             ▼
+   ▼                                    MemberReconciliationService
+Services  (regole di dominio, invariate)         │
+   │                                             │
+   ├───────────────► DiscordGateway ─────────────┤
+   │                 (DiscordRestGateway)        │
+   ▼                        │                    │
+Repositories                ▼                    │
+   │                 Discord REST API ◄──────────┘
+   ▼
+Prisma 7 + @prisma/adapter-pg
+   │
+   ▼
+Cloudflare Hyperdrive → Neon PostgreSQL
+```
+
+Tre punti che definiscono la V2:
+
+1. **Nessun Gateway.** Le interaction arrivano come richieste HTTP firmate.
+   Ogni operazione Discord passa dalla REST API attraverso un solo adapter.
+2. **Nessuno stato in memoria.** Ogni invocazione parte da zero. Tutto ciò che
+   deve sopravvivere sta a database — inclusi i pannelli persistenti e gli
+   snapshot dei membri.
+3. **I tre eventi di membership diventano un cron.** `guildMemberAdd`,
+   `guildMemberRemove` e `guildMemberUpdate` non esistono più: la
+   riconciliazione periodica li deduce confrontando lo stato Discord con
+   l'ultimo snapshot.
+
+---
+
 ## Requisiti
 
 | Componente | Versione | Note |
 | --- | --- | --- |
-| Node.js | **≥ 22.12** (LTS) | richiesto da Prisma 7 (`^20.19 \|\| ^22.12 \|\| >=24`) |
+| Node.js | **≥ 22.12** (LTS) | per gli script locali e la Prisma CLI |
 | npm | ≥ 10 | incluso con Node 22 |
+| Account Cloudflare | piano **Free** | Workers + Cron + Hyperdrive |
 | PostgreSQL | 16+ | fornito da Neon |
 | Git | qualsiasi recente | |
 
@@ -62,14 +110,24 @@ Stack applicativo:
 | Pacchetto | Versione | Ruolo |
 | --- | --- | --- |
 | `typescript` | 6.0.3 | vedi nota sotto |
-| `discord.js` | 14.27.0 | Discord API |
+| `@discordjs/builders` | 1.14.1 | builder di embed, bottoni, modal, comandi |
+| `discord-api-types` | 0.38.53 | tipi ed enum dell'API Discord |
 | `prisma` / `@prisma/client` | 7.9.1 | ORM + CLI |
 | `@prisma/adapter-pg` | 7.9.1 | driver adapter PostgreSQL |
+| `wrangler` | 4.123.0 | CLI Cloudflare Workers |
 | `eslint` | 10.8.1 | + `typescript-eslint` 8.67.0 |
 | `prettier` | 3.9.6 | formattazione |
 | `vitest` | 4.1.10 | test |
-| `tsx` | 4.23.12 | esecuzione TS in dev |
-| `pino` | 10.3.1 | logging strutturato |
+
+`discord.js` **non è più una dipendenza**. Il pacchetto completo porta con sé
+WebSocket, `zlib` e la cache della guild: cose che sulla runtime dei Worker non
+funzionano e che, comunque, servivano solo al Gateway. Restano i *builder*
+(`@discordjs/builders`), che sono JavaScript puro e girano identici ovunque —
+quindi tutti i componenti della V1 sono rimasti invariati.
+
+Anche `pino` è stato sostituito: dipende da `worker_threads` e dagli stream di
+Node. Al suo posto c'è un logger strutturato minimale con la stessa API e le
+stesse garanzie di redazione dei secret (`src/utils/logger.ts`).
 
 ### Nota su TypeScript 6 vs 7
 
@@ -90,27 +148,51 @@ non richiede modifiche.
 git clone git@github.com:fumaghe/ttp-control.git
 cd ttp-control
 npm install          # `postinstall` esegue automaticamente `prisma generate`
-cp .env.example .env # poi riempi i valori segreti
 ```
+
+Poi vedi **[Cosa devi fare tu](#cosa-devi-fare-tu)** per la configurazione
+completa di Cloudflare, Discord e Neon.
 
 ---
 
-## Configurazione `.env`
+## Configurazione
 
-`.env.example` contiene **tutti** i placeholder e gli ID Discord non sensibili.
-Vanno compilati a mano solo tre valori:
+La configurazione vive in tre posti diversi, per una ragione precisa:
 
-```env
-DISCORD_TOKEN=      # Developer Portal → Bot → Reset Token
-DATABASE_URL=       # Neon, endpoint POOLED
-DIRECT_URL=         # Neon, endpoint DIRECT (unpooled)
+| Dove | Cosa | Perché lì |
+| --- | --- | --- |
+| `wrangler.jsonc` → `vars` | ID di ruoli, canali, guild, client, owner | Non sono segreti: identificano oggetti di un server privato e non danno accesso a nulla. Versionarli rende il deploy riproducibile. |
+| Wrangler secrets | `DISCORD_TOKEN`, `DISCORD_PUBLIC_KEY`, eventuale `DATABASE_URL` | Sono credenziali. Cloudflare le cifra e non compaiono mai in un file del repository. |
+| `.env` (solo locale) | tutto, per gli script Node | Serve a `npm run commands:deploy` e alla Prisma CLI, che girano sulla tua macchina. |
+
+```bash
+# Secret di produzione — mai in wrangler.jsonc
+npx wrangler secret put DISCORD_TOKEN
+npx wrangler secret put DISCORD_PUBLIC_KEY
 ```
 
-Tutti gli ID di ruoli e canali sono già presenti in `.env.example`. Il codice
-li legge esclusivamente tramite `src/config/env.ts`: **non esistono snowflake
-hardcoded nei service**, e i ruoli non vengono mai cercati per nome.
+`.env.example` documenta ogni variabile. `.env` e `.dev.vars` sono in
+`.gitignore` e non devono mai finire nel repository.
 
-`.env` è in `.gitignore` e non deve mai finire nel repository.
+Il codice legge la configurazione esclusivamente tramite `src/config/env.ts`:
+**non esistono snowflake hardcoded nei service**, e i ruoli non vengono mai
+cercati per nome.
+
+### `DISCORD_PUBLIC_KEY` — non è il bot token
+
+È la variabile nuova della V2, e l'errore più facile da fare è confonderla con
+il token.
+
+| | `DISCORD_TOKEN` | `DISCORD_PUBLIC_KEY` |
+| --- | --- | --- |
+| Cosa fa | autentica il bot verso Discord | verifica che una richiesta venga davvero da Discord |
+| Dove si trova | Developer Portal → **Bot** → Reset Token | Developer Portal → **General Information** → Public Key |
+| Che aspetto ha | tre segmenti separati da punto | 64 caratteri esadecimali, senza punti |
+| Se lo perdi | vai in panico e resettalo | niente, è pubblica |
+
+Senza `DISCORD_PUBLIC_KEY` il Worker non può distinguere una interaction
+autentica da un POST inviato da chiunque conosca l'URL dell'endpoint. È
+l'**unica** autenticazione che quell'endpoint ha.
 
 ---
 
@@ -156,13 +238,52 @@ anche in build CI/Docker senza database.
 
 - Generator `prisma-client` (non più `prisma-client-js`), con `output` obbligatorio.
 - Il client viene generato come **sorgente TypeScript** in `src/generated/prisma/`,
-  compilata insieme al progetto. È un artefatto di build: è in `.gitignore` ed
-  escluso da ESLint.
-- `importFileExtension = "js"` fa emettere import ESM `./enums.js`, compatibili
-  con `module: nodenext` senza flag aggiuntivi.
-- Il client richiede un **driver adapter**. Usiamo `@prisma/adapter-pg` (driver
-  `pg` su TCP), la scelta corretta per un processo long-running su VPS;
-  `@prisma/adapter-neon` (WebSocket) ha senso solo in contesti serverless/edge.
+  impacchettata insieme al progetto. È un artefatto di build: è in `.gitignore`
+  ed escluso da ESLint.
+- `importFileExtension = "js"` fa emettere import ESM `./enums.js`.
+- Il client richiede un **driver adapter**: `@prisma/adapter-pg`.
+
+### Database su Cloudflare — la scelta e il perché
+
+`runtime = "workerd"` nel generator è la riga che rende possibile tutto il
+resto. Con quella impostazione Prisma emette il query compiler come **modulo
+WebAssembly vero** (`query_compiler_fast_bg.wasm`), che wrangler impacchetta
+insieme al Worker.
+
+È la differenza fra funzionare e non funzionare: il client generato per Node
+incorpora lo stesso compiler come stringa base64 e lo compila a runtime con
+`WebAssembly.compile()`. Sulla runtime dei Worker la compilazione dinamica di
+WebAssembly è **vietata**. Il bundle si costruirebbe lo stesso, e fallirebbe
+alla prima query.
+
+Il percorso scelto è quindi quello documentato da Prisma per Cloudflare:
+
+```text
+Repositories → Prisma 7 (client workerd) → @prisma/adapter-pg → Hyperdrive → Neon
+```
+
+**Perché Hyperdrive.** Un Worker non mantiene connessioni fra due invocazioni:
+senza un pooler davanti, ogni interaction aprirebbe una connessione TCP nuova
+verso Neon, pagando l'handshake TLS ogni volta e consumando il limite di
+connessioni del progetto. Hyperdrive tiene il pool lato Cloudflare ed è
+gratuito sul piano Free. Il Worker riceve la connection string dal binding, e
+`DATABASE_URL` resta come fallback per `wrangler dev` senza binding.
+
+**Cosa NON è cambiato**, ed è il punto: il database Neon è lo stesso, lo schema
+è lo stesso, le migration esistenti sono intatte, e le interfacce dei
+repository non sono state toccate. Hyperdrive è un pooler davanti a Neon, non
+un altro database. Nessuna migrazione a D1, nessun nuovo database.
+
+**Il costo di questa scelta.** Il query compiler WebAssembly pesa ~3,7 MB
+(~1,2 MB compressi) e il bundle completo arriva a ~1,5 MB compressi, contro il
+limite di 3 MiB del piano gratuito. C'è margine, ma non è illimitato: la CI
+verifica la dimensione a ogni build, così un superamento si scopre in pipeline
+e non al momento del deploy.
+
+**L'alternativa che abbiamo scartato** era il driver HTTP di Neon con SQL
+scritta a mano: bundle molto più piccolo, ma avrebbe richiesto di riscrivere
+tutti e undici i repository e di rinunciare alla garanzia che schema e query
+restino allineati. Non valeva il risparmio.
 
 ### Migrations
 
@@ -180,8 +301,9 @@ Le migration sono versionate in `prisma/migrations/` e vanno committate.
 ## Sviluppo
 
 ```bash
-npm run dev            # tsx watch, hot reload
-npm run typecheck      # tsc --noEmit su src, tests, scripts, config
+npm run worker:dev     # wrangler dev — Worker in locale
+npm run worker:tail    # log in streaming dal Worker in produzione
+npm run typecheck      # tsc su entrambi i progetti (condiviso + Worker)
 npm run lint           # ESLint (type-aware)
 npm run lint:fix       # ESLint con autofix
 npm run format         # Prettier --write
@@ -194,12 +316,49 @@ npm run check          # typecheck + lint + format:check + test
 
 `npm run check` è il gate da eseguire prima di ogni commit.
 
-## Build e produzione
+### Esporre il Worker locale a Discord
+
+`wrangler dev` ascolta su `http://localhost:8787`, ma Discord deve poter
+raggiungere l'endpoint da internet: serve un tunnel.
 
 ```bash
-npm run build   # prisma generate + tsc -> dist/
-npm start       # node dist/index.js
+# Terminale 1
+cp .dev.vars.example .dev.vars   # poi compila i secret
+npm run worker:dev
+
+# Terminale 2 — tunnel pubblico
+npx cloudflared tunnel --url http://localhost:8787
+#   → https://qualcosa-di-casuale.trycloudflare.com
 ```
+
+Incolla `https://<tunnel>/interactions` come **Interactions Endpoint URL** nel
+Developer Portal. Discord invia subito un PING firmato: se il Worker locale
+risponde `{"type":1}`, la configurazione è corretta.
+
+> Attenzione: l'Interactions Endpoint URL è **uno solo** per applicazione.
+> Mentre punta al tunnel, la produzione non riceve interaction. Per sviluppare
+> senza interferenze conviene una seconda applicazione Discord di test, con il
+> suo token e la sua Public Key.
+>
+> L'URL di `cloudflared` cambia a ogni avvio: va reincollato ogni volta.
+
+Il tunnel serve solo alle interaction. Il **Cron Trigger non parte** in
+`wrangler dev`: per provarlo si usa l'endpoint di test di wrangler:
+
+```bash
+npx wrangler dev --test-scheduled
+curl "http://localhost:8787/__scheduled?cron=*/5+*+*+*+*"
+```
+
+## Build e validazione del bundle
+
+```bash
+npm run build          # prisma generate + build del Worker
+npm run worker:build   # wrangler deploy --dry-run --outdir dist/worker
+```
+
+`worker:build` esegue esattamente lo stesso bundling del deploy, senza
+pubblicare nulla e senza credenziali Cloudflare: è quello che gira in CI.
 
 ## Deploy degli slash command
 
@@ -207,8 +366,13 @@ npm start       # node dist/index.js
 npm run commands:deploy
 ```
 
-I comandi vengono registrati sulla singola guild (`GUILD_ID`): la propagazione è
-immediata, a differenza dei comandi globali.
+Registrazione per-guild (`GUILD_ID`): la propagazione è immediata, a differenza
+dei comandi globali. Lo script usa lo stesso client REST del Worker — nessun
+Gateway, nessun processo persistente.
+
+Va rieseguito solo quando cambiano **nome, descrizione o opzioni** di un
+comando; il deploy del Worker da solo non aggiorna la definizione dei comandi
+lato Discord.
 
 ---
 
@@ -222,7 +386,7 @@ un canale pubblico.
 
 | Comando | Cosa fa |
 | --- | --- |
-| `/ping` | Latenza gateway, stato del database, uptime |
+| `/ping` | Latenza Discord REST, stato del database, uptime dell’isolate |
 | `/apply ttp` | Invia una candidatura d'ingresso nella gang |
 | `/apply cancel` | Ritira la propria candidatura in attesa |
 | `/apply status` | Storico delle proprie candidature |
@@ -276,18 +440,21 @@ non autorizza chi ci clicca sopra adesso.
 
 ```text
 ttp-control/
+├── wrangler.jsonc           # configurazione Worker: vars, cron, Hyperdrive
 ├── prisma/
 │   ├── schema.prisma        # modelli + enum di dominio
 │   └── migrations/
+├── deployment/
+│   └── legacy-gateway/      # Docker della V1 + istruzioni di rollback
 ├── scripts/
-│   └── deploy-commands.ts   # registrazione slash command
+│   └── deploy-commands.ts   # registrazione slash command via REST
 ├── src/
-│   ├── index.ts             # entrypoint
-│   ├── client/              # costruzione del Discord client
+│   ├── worker/              # entrypoint Cloudflare: fetch() e scheduled()
+│   ├── http/                # firma Ed25519, InteractionContext, responder, router
+│   ├── discord/             # client REST, DiscordRestGateway, audit sink, payload
 │   ├── commands/            # slash command, per dominio
-│   ├── interactions/        # button / modal / select handler
-│   ├── events/              # ready, interactionCreate, guildMember*
-│   ├── services/            # business logic
+│   ├── interactions/        # registry + button / modal / select handler
+│   ├── services/            # business logic (invariata dalla V1)
 │   ├── repositories/        # accesso dati (unico strato che tocca Prisma)
 │   ├── components/          # embed, button, modal, select riutilizzabili
 │   ├── config/              # env validation, ruoli, canali, permessi
@@ -297,9 +464,19 @@ ttp-control/
 │   ├── utils/               # logger, helper
 │   └── generated/prisma/    # client generato (non versionato)
 └── tests/
-    ├── unit/
-    └── integration/
+    ├── support/             # harness in memoria, fixture Discord
+    └── unit/
 ```
+
+Cosa è cambiato rispetto alla V1, cartella per cartella:
+
+| V1 | V2 | |
+| --- | --- | --- |
+| `src/index.ts` | `src/worker/index.ts` | processo → `fetch()` + `scheduled()` |
+| `src/client/` | `src/discord/` | client discord.js → adapter REST |
+| `src/events/` | `src/services/memberReconciliationService.ts` | eventi Gateway → cron |
+| — | `src/http/` | firma, DTO, responder, router: tutto nuovo |
+| `src/services/`, `src/repositories/`, `src/config/` | invariati | è il punto della migrazione |
 
 ### Direzione delle dipendenze
 
@@ -356,37 +533,62 @@ sopra `👑 OG`, e sotto i ruoli di staff umano che non deve toccare.
 `/setup` (Phase 2) verifica questa condizione e segnala esattamente quali ruoli
 non sono gestibili.
 
-## Gateway Intents
+## Server Members Intent (serve ancora)
 
-Abilitati solo:
+Senza Gateway non ci sono più *intents* nel senso della connessione
+WebSocket — ma **`Server Members Intent` resta obbligatorio**, ed è
+controintuitivo abbastanza da meritare una riga:
 
-- `Guilds`
-- `GuildMembers` — **privileged**, va attivato nel Developer Portal
-  (Bot → Privileged Gateway Intents → Server Members Intent)
+> `GET /guilds/{id}/members` è un endpoint REST, e Discord lo protegge con lo
+> stesso intent privilegiato del Gateway.
 
-**Non** abilitato `Message Content`: il bot non legge i messaggi degli utenti.
+Va quindi lasciato attivo in **Developer Portal → Bot → Privileged Gateway
+Intents → Server Members Intent**. Senza, la riconciliazione periodica non può
+enumerare i membri e il bot smette di accorgersi di chi entra ed esce.
+
+`Message Content` resta **non** abilitato: il bot non legge i messaggi degli
+utenti.
+
+`/setup check` verifica l'intent provando davvero l'enumerazione.
 
 ---
 
 ## Sicurezza
 
-Checklist prima della produzione:
+### Superficie HTTP (nuova nella V2)
 
-- [ ] `DISCORD_TOKEN` mai committato
-- [ ] password Neon mai committata
-- [ ] `.env` ignorato da git
-- [ ] nessun secret nei log (il logger redige token e connection string)
-- [ ] nessun `Administrator` sul bot
-- [ ] ruolo del bot posizionato sopra i ruoli gestiti
-- [ ] authorization applicativa attiva su ogni comando **e** su ogni click
-- [ ] `customId` di button e modal validati
-- [ ] input dei modal validati lato server
-- [ ] nessuna fiducia nei valori provenienti dal client
-- [ ] accesso al database solo tramite repository
-- [ ] audit log funzionante
-- [ ] blacklist funzionante e autorevole sul DB
-- [ ] `npm audit` verificato
-- [ ] backup del database configurato
+Il Worker espone un endpoint pubblico su internet. Chiunque ne conosca l'URL
+può inviarci una richiesta: è la differenza sostanziale rispetto al Gateway,
+dove il canale era autenticato dal token una volta sola all'avvio.
+
+| Controllo | Dove | Cosa impedisce |
+| --- | --- | --- |
+| Firma Ed25519 obbligatoria | `src/http/signature.ts` | richieste non provenienti da Discord |
+| Verifica sul corpo **grezzo** | `src/worker/index.ts` | manomissione del payload con un JSON riserializzato |
+| Finestra sul timestamp (5 min) | `src/http/signature.ts` | replay di una richiesta valida catturata |
+| Risposta 401 indistinguibile | `src/worker/index.ts` | far capire a chi sonda quanto si è avvicinato |
+| Guild ID validato | `src/http/router.ts` | applicare la configurazione di questo server altrove |
+| `customId` validato | `src/utils/customId.ts` | namespace, azioni e argomenti arbitrari da un client manipolato |
+| Authorization a **ogni** click | `src/services/authorizationService.ts` | riuso di un pannello pubblicato da un OG |
+| Ruoli e canali solo da config | `src/config/` | ID arbitrari presi dal payload → SSRF / privilege escalation |
+| URL Discord costruiti in un solo posto | `src/discord/rest.ts` | richieste verso host arbitrari |
+| Bot token mai sugli endpoint webhook | `src/http/responder.ts` | esposizione gratuita della credenziale |
+| Rate limit gestito con tetto ai retry | `src/discord/rest.ts` | loop di retry che brucia il budget |
+| Secret redatti nei log | `src/utils/logger.ts` | token e connection string in `wrangler tail` |
+
+Due punti che vale la pena rendere espliciti:
+
+- **Nessun ID arbitrario dal payload.** Il Worker non assegna mai un ruolo o
+  scrive mai in un canale il cui ID arriva dalla richiesta. Ruoli e canali
+  vengono esclusivamente dal registry costruito sulla configurazione. Un
+  `customId` può contenere un Discord ID *bersaglio*, che viene rivalidato
+  come snowflake e passato all'authorization prima di qualsiasi effetto.
+- **Nessuna fiducia nelle risposte di Discord.** Il gateway REST tratta i
+  payload dell'API come ipotesi da validare, non come tipi garantiti: un
+  membro senza `user`, un ruolo mancante o un messaggio cancellato producono
+  un percorso gestito, non un crash.
+
+### Checklist prima della produzione
 
 ### Se un secret viene esposto
 
@@ -396,7 +598,11 @@ basta: resta nella history di git.
 
 - **Discord token** → Developer Portal → Bot → *Reset Token*
 - **Password Neon** → Neon Console → *Reset password* del ruolo, poi aggiornare
-  `DATABASE_URL` e `DIRECT_URL`
+  `DATABASE_URL`, `DIRECT_URL` e la configurazione Hyperdrive
+  (`npx wrangler hyperdrive update <id> --connection-string="..."`)
+
+La `DISCORD_PUBLIC_KEY` non è un segreto: se finisce in un log non c'è nulla
+da fare. Serve a *verificare* firme, non a produrle.
 
 ### Permission matrix
 
@@ -460,104 +666,393 @@ verificare periodicamente il restore su un branch Neon usa e getta.
 
 ---
 
+## Riconciliazione periodica (Cron Trigger)
+
+Senza Gateway, i tre eventi di membership della V1 non esistono più. Al loro
+posto un Cron Trigger ogni 5 minuti confronta lo stato Discord con l'ultimo
+snapshot salvato e ne **deduce** gli stessi eventi.
+
+| Evento Gateway (V1) | Come viene dedotto (V2) |
+| --- | --- |
+| `guildMemberAdd` | Discord ID presente ora, assente (o `inGuild = false`) nello snapshot |
+| `guildMemberRemove` | ID nello snapshot con `inGuild = true`, assente dall'enumerazione |
+| `guildMemberUpdate` | `rolesHash` diverso da quello registrato |
+
+Lo snapshot vive nella tabella `guild_member_snapshots` (modello
+`GuildMemberSnapshot`). Non duplica `DiscordProfile`: quello è l'anagrafica
+applicativa, questo è lo stato Discord grezzo, tenuto al solo scopo di
+calcolare un diff.
+
+**Le regole di dominio sono identiche alla V1:**
+
+- un nuovo arrivato non riceve **nessun** ruolo: la verifica resta volontaria;
+- chi rientra viene controllato contro la blacklist, che è autorevole a
+  database — uscire e rientrare non la aggira;
+- chi esce dal Discord **non** viene rimosso dalla gang: si emette
+  `MEMBER_LEFT_DISCORD`, più un `ROLE_SYNC_WARNING` se era un membro TTP, e la
+  decisione resta alla Leadership;
+- una modifica manuale dei ruoli produce un `ROLE_SYNC_WARNING` con
+  `autoCorrected: false`. **Nessuna correzione automatica**, mai.
+
+Tre proprietà che rendono il cron sicuro da ripetere:
+
+1. **Seed silenzioso.** Alla prima esecuzione su una guild senza snapshot lo
+   stato viene fotografato *senza* emettere eventi di join — altrimenti il
+   primo cron inonderebbe l'audit con un `MEMBER_JOINED_DISCORD` per ogni
+   membro già presente.
+2. **Isolamento degli errori.** Ogni membro è indipendente: se il suo
+   trattamento fallisce, il suo snapshot **non** viene aggiornato e la
+   prossima esecuzione riprova. Uno stato avanzato per qualcosa che non è
+   successo sarebbe una corruzione silenziosa.
+3. **Idempotenza.** Una seconda esecuzione senza cambiamenti non produce
+   nessun evento.
+
+Il cron è la ragione per cui il progetto sta comodamente nel piano gratuito:
+288 esecuzioni al giorno, ognuna con una manciata di richieste (l'enumerazione
+dei membri è paginata a 1000 per pagina — per una guild privata è una sola
+pagina) e una query di lettura più le upsert dei soli membri osservati.
+
+Cambiare la frequenza significa modificare `triggers.crons` in
+`wrangler.jsonc` e rifare il deploy.
+
+---
+
 ## Deployment
 
-Target: **VPS Linux con Docker**. Il database è Neon, quindi non c'è nessun
-servizio PostgreSQL da orchestrare e nessun volume dati da gestire.
+Target: **Cloudflare Workers, piano gratuito**. Nessuna VPS, nessun container,
+nessun processo da sorvegliare.
 
 ```bash
-git clone git@github.com:fumaghe/ttp-control.git /opt/ttp-control
-cd /opt/ttp-control
-cp .env.example .env      # compila DISCORD_TOKEN, DATABASE_URL, DIRECT_URL
-chmod 600 .env
-
-npm ci --ignore-scripts && npx prisma generate
-npm run prisma:migrate:deploy   # applica le migration a Neon
-
-docker compose up -d --build
-docker compose logs -f
+npm run worker:deploy
 ```
 
-Cosa garantisce la configurazione:
+Il deploy produce un URL del tipo:
 
-| Requisito | Come |
-| --- | --- |
-| Nessun secret nell'immagine | `.env` è in `.dockerignore`, letto a runtime da `env_file` |
-| Utente non-root | l'immagine gira come `node` |
-| Solo dipendenze di produzione | stage `deps` con `npm ci --omit=dev` |
-| Riavvio dopo crash e reboot | `restart: unless-stopped` |
-| Graceful shutdown | `dumb-init` come PID 1, SIGTERM → chiusura di client e pool |
-| Log limitati | rotazione json-file, 10 MB × 5 |
-| Filesystem in sola lettura | `read_only: true` + `tmpfs` per `/tmp` |
-| Nessuna escalation | `no-new-privileges` |
+```text
+https://ttp-control.<tuo-account>.workers.dev
+```
 
-Aggiornamento:
+L'endpoint da dare a Discord è quell'URL con `/interactions` in fondo.
+
+### Interactions Endpoint URL
+
+Dopo il primo deploy, nel Developer Portal:
+
+```text
+Discord Developer Portal
+  → la tua Application
+  → General Information
+  → Interactions Endpoint URL
+  → https://ttp-control.<account>.workers.dev/interactions
+  → Save Changes
+```
+
+Al salvataggio Discord invia **immediatamente un PING firmato**. Il Worker lo
+verifica e risponde `{"type": 1}`; se la firma non torna, Discord rifiuta
+l'URL con un errore esplicito. Non c'è niente da fare a mano: il PING è
+gestito prima di qualunque altra logica, e non tocca né il database né la rete.
+
+Se il salvataggio fallisce, nel 99% dei casi `DISCORD_PUBLIC_KEY` è sbagliata
+o non è stata caricata — vedi [Troubleshooting](#troubleshooting).
+
+### Aggiornamenti
 
 ```bash
 git pull
-npm run prisma:migrate:deploy   # se ci sono nuove migration
-docker compose up -d --build
+npm run prisma:migrate:deploy   # solo se ci sono nuove migration
+npm run worker:deploy
 ```
 
-Alternativa senza Docker (systemd + `npm run build` + `npm start`) è
-altrettanto valida: il bot legge la configurazione dall'ambiente in entrambi i
-casi.
+Cloudflare fa lo switch atomicamente: nessuna finestra di downtime, nessun
+restart da coordinare. I bottoni dei pannelli pubblicati **prima** del deploy
+continuano a funzionare, perché il loro `customId` non contiene stato volatile
+e tutto ciò che serve a servirli sta a database.
 
-### CI
+### Osservabilità
 
-`.github/workflows/ci.yml` esegue su ogni push e PR: typecheck, lint,
-format-check, test, build e `npm audit --omit=dev`. Non serve un database:
-`prisma generate` legge solo lo schema.
+```bash
+npm run worker:tail            # log in streaming
+npx wrangler deployments list  # storico dei deploy
+npx wrangler rollback          # torna al deploy precedente
+```
+
+I log sono JSON strutturato con i secret già redatti (vedi
+`src/utils/logger.ts`). `observability.enabled` in `wrangler.jsonc` li rende
+consultabili anche dalla dashboard.
+
+### Differenze percepibili rispetto al Gateway
+
+| | Gateway (V1) | Workers (V2) |
+| --- | --- | --- |
+| Presenza del bot | risulta **Online** | nessuna presenza |
+| Latenza di risposta | costante | primo colpo leggermente più lento (cold start) |
+| Eventi membri | istantanei | entro 5 minuti |
+| Costo | VPS | gratuito |
+| Comandi, pannelli, permessi | — | **identici** |
+
+L'assenza dello stato *Online* è l'unica cosa che gli utenti notano: è
+intrinseca alle HTTP Interactions, non un limite dell'implementazione.
+
+## CI
+
+`.github/workflows/ci.yml` esegue su ogni push e PR, senza bisogno di alcun
+secret:
+
+| Step | Cosa verifica |
+| --- | --- |
+| `prisma generate` | il client `workerd` si genera, wasm incluso |
+| `prisma validate` | lo schema è valido |
+| `npm run typecheck` | entrambi i progetti: condiviso (Node) e Worker (Cloudflare) |
+| `npm run lint` | ESLint type-aware su tutto, Worker compreso |
+| `npm run format:check` | Prettier |
+| `npm test` | l'intera suite |
+| `wrangler deploy --dry-run` | il bundle del Worker si costruisce davvero |
+| check dimensione bundle | resta sotto i 3 MiB compressi del piano gratuito |
+| `npm audit --omit=dev` | vulnerabilità nelle dipendenze di produzione |
+
+Il dry-run è la validazione che conta: esegue lo stesso bundling del deploy —
+risoluzione dei moduli, `nodejs_compat`, wasm del query compiler — e fallisce
+sulle stesse cose su cui fallirebbe `wrangler deploy`.
 
 ---
 
 ## Troubleshooting
 
-**`Environment variable not found: DATABASE_URL`**
-`.env` assente o incompleto. `cp .env.example .env` e compilare i valori.
+**Discord rifiuta l'Interactions Endpoint URL**
+Nell'ordine: (1) `DISCORD_PUBLIC_KEY` è il valore di *General Information →
+Public Key*, non il bot token; (2) è stata caricata come secret
+(`npx wrangler secret list` deve elencarla); (3) il deploy successivo al
+caricamento del secret è stato fatto; (4) l'URL finisce con `/interactions`.
+Prova prima `curl https://<worker>/interactions` — deve rispondere con un
+messaggio di health check, non con un errore.
+
+**Ogni interaction risponde "L'applicazione non ha risposto"**
+Vuol dire che il Worker non ha risposto entro 3 secondi. Guarda
+`npm run worker:tail`: quasi sempre è il database irraggiungibile
+(Hyperdrive mal configurato, o `DATABASE_URL` assente senza binding). Il
+responder emette comunque un deferred automatico a 2,2 s, quindi il caso in
+cui l'utente vede quel messaggio significa che il Worker è morto prima.
+
+**`worker misconfigured` con HTTP 500**
+Una variabile obbligatoria manca o è malformata. `npm run worker:tail` mostra
+l'elenco completo dei problemi — senza mai stampare i valori dei secret.
+
+**Il Cron non sembra girare**
+`npx wrangler deployments list` per confermare il deploy, poi la dashboard
+Cloudflare → Workers → il tuo Worker → *Cron Events*. In `wrangler dev` il
+cron **non** parte da solo: serve `--test-scheduled`.
+
+**Il cron gira ma non rileva niente**
+Se `guild_member_snapshots` era vuota, la prima esecuzione è un seed
+silenzioso per costruzione: fotografa e basta. Dalla seconda in poi rileva i
+cambiamenti.
+
+**`Missing Access` o zero membri nell'enumerazione**
+`Server Members Intent` non è attivo. Serve **anche** senza Gateway, perché
+protegge l'endpoint REST `GET /guilds/{id}/members`. `/setup check` lo
+diagnostica.
+
+**Il deploy fallisce per dimensione del bundle**
+Il piano gratuito si ferma a 3 MiB compressi. Il bundle attuale è ~1,5 MiB, quindi
+il problema è quasi certamente una dipendenza appena aggiunta. `npm run worker:build`
+e poi `gzip -9 -c dist/worker/index.js | wc -c` per misurare.
 
 **`prisma migrate` si blocca o fallisce con errori di advisory lock**
 Stai migrando attraverso il pooler. Imposta `DIRECT_URL` con l'endpoint senza
-`-pooler`.
+`-pooler`. Le migration si applicano **sempre** dalla tua macchina verso Neon,
+mai dal Worker.
 
 **`Cannot find module '../generated/prisma/client.js'`**
 Il client non è stato generato: `npm run prisma:generate`.
 
-**`Used disallowed intents`**
-`Server Members Intent` non è attivo nel Developer Portal → Bot → Privileged
-Gateway Intents.
-
 **`Missing Permissions` assegnando un ruolo**
 Il ruolo del bot è sotto il ruolo che sta cercando di assegnare. Spostalo sopra
-`👑 OG`. `/setup` diagnostica il caso indicando i ruoli non gestibili.
+`👑 OG`. `/setup check` indica esattamente quali ruoli non sono gestibili.
 
 **Gli slash command non compaiono**
-Esegui `npm run commands:deploy`. I comandi sono registrati per guild, quindi
-`GUILD_ID` deve corrispondere al server.
+`npm run commands:deploy`. Il deploy del Worker non registra i comandi: sono
+due cose separate.
 
-**Il pannello di verifica si duplica dopo un restart**
-I pannelli persistenti sono tracciati nella tabella `PersistentPanel`
-(`channelId` + `messageId`). Se il record è stato perso, cancella il messaggio
-orfano e ripubblica il pannello.
+**Il pannello di verifica si duplica dopo un deploy**
+Non dovrebbe: i pannelli sono tracciati in `PersistentPanel` (`channelId` +
+`messageId`) e `/setup verify-panel` aggiorna quello esistente. Se il record è
+stato perso, cancella il messaggio orfano e ripubblica.
 
 **`npm audit` segnala `deepmerge-ts`**
-Era una vulnerabilità transitiva di `@prisma/config`. È risolta con un
-`overrides` in `package.json` che forza `deepmerge-ts@^8.0.1`, la versione
-corretta. L'alternativa suggerita da `npm audit fix --force` sarebbe stata
-declassare Prisma alla 6.x, cioè rompere schema, generator e adapter: un
-override mirato è la soluzione proporzionata. Alla prossima release di Prisma
-che aggiorna la dipendenza, l'override si può rimuovere.
+Vulnerabilità transitiva di `@prisma/config`, risolta con un `overrides` in
+`package.json` che forza `deepmerge-ts@^8.0.1`. L'alternativa suggerita da
+`npm audit fix --force` sarebbe stata declassare Prisma alla 6.x: un override
+mirato è la soluzione proporzionata.
 
-**Warning `SSL modes 'prefer', 'require'…` all'avvio**
-Avviso di `pg` sul cambio di semantica previsto in `pg` v9: oggi `sslmode=require`
-si comporta come `verify-full`, in futuro no. Con Neon (certificati validi) puoi
-già usare `?sslmode=verify-full` nelle connection string per fissare il
-comportamento attuale ed eliminare l'avviso.
+---
 
-**Il bot resta appeso all'avvio**
-Non può: `connectDatabase` ha un timeout di 15 secondi e il processo termina con
-un messaggio che indica host e database (mai la password). Con Docker il
-`restart: unless-stopped` riprova da solo.
+## Cosa devi fare tu
+
+Sequenza completa dal repository clonato al bot funzionante in produzione.
+
+### 1. Cloudflare
+
+```bash
+npm install
+npx wrangler login          # apre il browser, autorizza l'account
+npx wrangler whoami         # conferma account e permessi
+```
+
+Se non hai un account: <https://dash.cloudflare.com/sign-up> — il piano Free
+basta per tutto quello che serve qui.
+
+### 2. Recupera `DISCORD_PUBLIC_KEY`
+
+```text
+https://discord.com/developers/applications
+  → la tua applicazione (CLIENT_ID 1538909559081541693)
+  → General Information
+  → Public Key            ← copia questo valore
+```
+
+Sono 64 caratteri esadecimali. **Non è il bot token**: quello sta sotto *Bot*,
+ha tre segmenti separati da punto ed è un'altra cosa.
+
+Nella stessa pagina, sotto **Bot → Privileged Gateway Intents**, verifica che
+**Server Members Intent** sia attivo: serve anche senza Gateway.
+
+### 3. Carica i secret
+
+```bash
+npx wrangler secret put DISCORD_TOKEN
+#   incolla il bot token, invio
+
+npx wrangler secret put DISCORD_PUBLIC_KEY
+#   incolla la public key del punto 2, invio
+
+npx wrangler secret list    # conferma che entrambi ci siano
+```
+
+I secret sono cifrati da Cloudflare e non compaiono mai in un file del
+repository.
+
+### 4. Neon + Hyperdrive
+
+Recupera le due connection string da Neon Console → progetto → *Connection
+Details*, alternando il toggle *Pooled connection*.
+
+```bash
+# Crea il pool Hyperdrive verso Neon.
+# Usa l'endpoint DIRETTO (host SENZA "-pooler"): il pooling lo fa Hyperdrive.
+npx wrangler hyperdrive create ttp-control-neon \
+  --connection-string="postgresql://UTENTE:PASSWORD@ep-xxx.REGION.aws.neon.tech/neondb?sslmode=require"
+```
+
+Il comando stampa un `id`. Aprilo `wrangler.jsonc` e sostituisci
+`"<hyperdrive-id>"` con quel valore:
+
+```jsonc
+"hyperdrive": [
+  { "binding": "HYPERDRIVE", "id": "il-tuo-id-qui", ... }
+]
+```
+
+> Se preferisci saltare Hyperdrive per un primo test, togli del tutto il blocco
+> `hyperdrive` da `wrangler.jsonc` e carica invece
+> `npx wrangler secret put DATABASE_URL` con l'endpoint **pooled** di Neon.
+> Funziona, ma apre una connessione nuova a ogni invocazione: per la
+> produzione usa Hyperdrive.
+
+### 5. Applica le migration
+
+Le migration si applicano dalla tua macchina, mai dal Worker.
+
+```bash
+cp .env.example .env
+#   compila DISCORD_TOKEN, DISCORD_PUBLIC_KEY, DATABASE_URL, DIRECT_URL
+
+npm run prisma:generate
+npm run prisma:migrate:deploy
+```
+
+Questo crea la sola tabella nuova della V2, `guild_member_snapshots`. Tutte le
+tabelle esistenti restano intatte: nessun dato viene toccato.
+
+### 6. Deploy del Worker
+
+```bash
+npm run build            # validazione locale del bundle
+npm run worker:deploy
+```
+
+### 7. Copia l'URL del Worker
+
+Il deploy stampa qualcosa come:
+
+```text
+Published ttp-control
+  https://ttp-control.<tuo-account>.workers.dev
+```
+
+Verifica che sia vivo:
+
+```bash
+curl https://ttp-control.<tuo-account>.workers.dev/interactions
+#   → TTP Control v1.0.0 — interactions endpoint attivo
+```
+
+### 8. Imposta l'Interactions Endpoint URL
+
+```text
+Discord Developer Portal
+  → la tua applicazione
+  → General Information
+  → Interactions Endpoint URL
+  → https://ttp-control.<tuo-account>.workers.dev/interactions
+  → Save Changes
+```
+
+Discord invia subito un PING firmato. Se il salvataggio va a buon fine, la
+verifica della firma funziona. Se fallisce, torna al punto 3: quasi sempre la
+public key è sbagliata o il deploy è precedente al caricamento del secret.
+
+### 9. Registra gli slash command
+
+```bash
+npm run commands:deploy
+#   → 9 comandi registrati
+```
+
+Registrazione per-guild: compaiono immediatamente nel server.
+
+### 10. Verifica in produzione
+
+Nel Discord, in quest'ordine:
+
+```text
+/ping                  → Discord API e Database entrambi 🟢
+/setup check           → tutti ✅, in particolare:
+                           • Guild
+                           • Role Hierarchy
+                           • Manage Roles / Manage Nicknames
+                           • ogni canale
+                           • Server Members Intent
+/setup verify-panel    → pubblica il pannello di verifica
+/setup control-panel   → pubblica il control panel
+/panel                 → il control panel effimero risponde
+/system sync-check     → report di integrità Discord ↔ database
+```
+
+Poi verifica il cron: aspetta 5 minuti e controlla i log.
+
+```bash
+npm run worker:tail
+#   cerca: "Snapshot iniziale della guild registrato" (prima esecuzione)
+#   poi:   "Riconciliazione completata"
+```
+
+La **prima** esecuzione del cron è un seed silenzioso: fotografa la guild senza
+emettere eventi. È voluto — senza, l'audit riceverebbe un
+`MEMBER_JOINED_DISCORD` per ogni membro già presente.
+
+Ultima prova, quella che conta davvero: clicca il bottone **VERIFY** nel
+pannello con un account di test, compila il modal, e controlla che compaia
+`✅ Verified` — e **non** `🩸 TTP`.
 
 ---
 
@@ -577,10 +1072,12 @@ un messaggio che indica host e database (mai la password). Con Docker il
 | 9 | `/panel` — control panel | ✅ |
 | 10 | Discord events | ✅ |
 | 11 | Data consistency e `/system sync-check` | ✅ |
+| 12 | **Migrazione a Cloudflare Workers + HTTP Interactions** | ✅ |
 
-Fuori dalla V1: web dashboard, OAuth2, integrazione FiveM, character linking,
+Fuori dalla V2: web dashboard, OAuth2, integrazione FiveM, character linking,
 stash, heist, voting, statistiche. L'architettura a strati le rende possibili
-senza riscritture, ma non fanno parte di questa versione.
+senza riscritture — la migrazione appena fatta ne è la dimostrazione: sono
+cambiati il trasporto e il runtime, non le regole di dominio.
 
 ---
 

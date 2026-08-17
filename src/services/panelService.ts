@@ -6,19 +6,21 @@
  * pannelli morti. Qui si tiene traccia del `messageId`, si prova a
  * modificare quello esistente, e si ricrea solo se e' stato cancellato.
  */
-import { type BaseMessageOptions, DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
 import type { PanelType } from '../generated/prisma/enums.js';
+import { DISCORD_ERROR_CODE } from '../discord/api.js';
+import type { MessagePayload } from '../discord/payload.js';
+import { isDiscordApiError } from '../discord/rest.js';
 import type { PersistentPanelRepository } from '../repositories/types.js';
 import { AppError, ERROR_CODE } from '../errors/AppError.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('panels');
 
-/** Operazioni sui messaggi, isolate per non legare il service a discord.js. */
+/** Operazioni sui messaggi, isolate per non legare il service al trasporto. */
 export interface PanelMessageGateway {
   /** @returns `false` se il messaggio non esiste piu'. */
-  edit(channelId: string, messageId: string, payload: BaseMessageOptions): Promise<boolean>;
-  send(channelId: string, payload: BaseMessageOptions): Promise<string>;
+  edit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean>;
+  send(channelId: string, payload: MessagePayload): Promise<string>;
 }
 
 export interface PanelSyncResult {
@@ -34,13 +36,13 @@ export interface PanelService {
   publish(input: {
     panelType: PanelType;
     channelId: string;
-    payload: BaseMessageOptions;
+    payload: MessagePayload;
   }): Promise<PanelSyncResult>;
 
   /** Aggiorna un pannello gia' pubblicato, senza crearlo se non esiste. */
   refresh(input: {
     panelType: PanelType;
-    payload: BaseMessageOptions;
+    payload: MessagePayload;
   }): Promise<PanelSyncResult | null>;
 }
 
@@ -63,10 +65,7 @@ export function createPanelService(deps: {
           }
         } catch (error) {
           // Un messaggio cancellato a mano non e' un errore: si ricrea.
-          if (
-            !(error instanceof DiscordAPIError) ||
-            error.code !== RESTJSONErrorCodes.UnknownMessage
-          ) {
+          if (!isDiscordApiError(error) || error.code !== DISCORD_ERROR_CODE.UNKNOWN_MESSAGE) {
             log.warn(
               { err: error, panelType: input.panelType },
               'Aggiornamento del pannello fallito: verrà ricreato',

@@ -1,14 +1,9 @@
 /**
  * Pannello pubblico di verifica e relativo modal.
  */
-import {
-  ActionRowBuilder,
-  type BaseMessageOptions,
-  ButtonBuilder,
-  ButtonStyle,
-  ModalBuilder,
-  TextInputStyle,
-} from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ModalBuilder } from '@discordjs/builders';
+import { ButtonStyle, TextInputStyle } from 'discord-api-types/v10';
+import type { MessagePayload } from '../../discord/payload.js';
 import { EMBED_COLOR, GANG_NAME } from '../../config/constants.js';
 import { buildCustomId } from '../../utils/customId.js';
 import { textField } from '../modals/fields.js';
@@ -26,7 +21,7 @@ export const VERIFY_FIELDS = {
   referral: 'referral',
 } as const;
 
-export function buildVerifyPanel(): BaseMessageOptions {
+export function buildVerifyPanel(): MessagePayload {
   const embed = brandEmbed('ACCESS SYSTEM')
     .setDescription(
       [
@@ -49,7 +44,7 @@ export function buildVerifyPanel(): BaseMessageOptions {
     new ButtonBuilder()
       .setCustomId(VERIFY_BUTTON_ID)
       .setLabel('VERIFY')
-      .setEmoji('🔐')
+      .setEmoji({ name: '🔐' })
       .setStyle(ButtonStyle.Success),
   );
 

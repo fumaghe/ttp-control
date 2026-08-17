@@ -1,0 +1,22 @@
+# =============================================================================
+# Secret per `wrangler dev` (sviluppo locale)
+# =============================================================================
+# Copia in `.dev.vars`. È l'equivalente locale di `wrangler secret put`:
+# wrangler li inietta nei binding del Worker senza mandarli a Cloudflare.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` NON deve mai essere committato.
+#
+# Gli ID Discord NON vanno qui: stanno in `vars` dentro wrangler.jsonc.
+# =============================================================================
+
+# Bot token — Developer Portal → Bot → Reset Token
+DISCORD_TOKEN=
+
+# Public Key Ed25519 — Developer Portal → General Information → Public Key
+# NON è il bot token: 64 caratteri esadecimali.
+DISCORD_PUBLIC_KEY=
+
+# Connection string Neon, usata quando il binding Hyperdrive non c'è.
+DATABASE_URL=

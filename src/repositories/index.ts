@@ -9,6 +9,7 @@ import { createAuditRepository } from './prisma/auditRepository.js';
 import { createBlacklistRepository } from './prisma/blacklistRepository.js';
 import { createDiscordProfileRepository } from './prisma/discordProfileRepository.js';
 import { createGuildConfigRepository } from './prisma/guildConfigRepository.js';
+import { createGuildMemberSnapshotRepository } from './prisma/guildMemberSnapshotRepository.js';
 import { createMemberHistoryRepository } from './prisma/memberHistoryRepository.js';
 import { createMemberRepository } from './prisma/memberRepository.js';
 import { createMemberSpecialRoleRepository } from './prisma/memberSpecialRoleRepository.js';
@@ -29,6 +30,7 @@ export function createRepositories(db: Database): Repositories {
     audit: createAuditRepository(db),
     guildConfig: createGuildConfigRepository(db),
     panels: createPersistentPanelRepository(db),
+    snapshots: createGuildMemberSnapshotRepository(db),
   };
 }
 

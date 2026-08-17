@@ -1,0 +1,20 @@
+{
+  /*
+   * Type-check del codice che gira sulla runtime Cloudflare.
+   *
+   * Separato dal tsconfig principale perché i tipi di Workers e quelli di
+   * Node definiscono entrambi `fetch`, `Request`, `Response`: mescolarli
+   * produrrebbe conflitti e, peggio, nasconderebbe l'uso accidentale di API
+   * Node che sul Worker non esistono.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["@cloudflare/workers-types"],
+    "lib": ["ES2023"],
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.worker.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

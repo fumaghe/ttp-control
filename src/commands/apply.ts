@@ -4,7 +4,7 @@
  * È il ponte fra `Verified` e `TTP`: l'utente si candida, la Leadership
  * decide. La verifica da sola non basta e non è mai sufficiente.
  */
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
 import { infoEmbed, successEmbed } from '../components/embeds/base.js';
 import { handleInteractionError } from '../errors/handleInteractionError.js';
 import type { SlashCommand } from '../types/command.js';

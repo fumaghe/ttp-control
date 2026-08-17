@@ -7,7 +7,7 @@ import globals from 'globals';
 
 export default defineConfig([
   // Build output e client generato da Prisma non vengono mai lintati.
-  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', 'src/generated/**']),
+  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', 'src/generated/**', '.wrangler/**']),
 
   js.configs.recommended,
 
@@ -17,7 +17,10 @@ export default defineConfig([
     languageOptions: {
       globals: { ...globals.node },
       parserOptions: {
-        project: ['./tsconfig.tools.json'],
+        // Due progetti: il codice condiviso + gli script sotto tsconfig.tools,
+        // il Worker sotto i tipi Cloudflare. Senza il secondo, src/worker/**
+        // resterebbe fuori dalle regole type-aware.
+        project: ['./tsconfig.tools.json', './tsconfig.worker.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

@@ -5,7 +5,8 @@
  * 6000 totali): con una gang numerosa il roster va spezzato in pagine, non
  * troncato in silenzio.
  */
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, type EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, type EmbedBuilder } from '@discordjs/builders';
+import { ButtonStyle } from 'discord-api-types/v10';
 import { MemberStatus } from '../../generated/prisma/enums.js';
 import { DISCORD_LIMITS, RANK_LABEL, RANK_ORDER } from '../../config/constants.js';
 import type { Member } from '../../repositories/types.js';
@@ -109,7 +110,7 @@ export function buildRosterControls(
       new ButtonBuilder()
         .setCustomId(buildCustomId('roster', 'page', String(Math.max(page - 1, 0)), filterToken))
         .setLabel('Precedente')
-        .setEmoji('◀️')
+        .setEmoji({ name: '◀️' })
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(page === 0),
       new ButtonBuilder()
@@ -122,7 +123,7 @@ export function buildRosterControls(
           buildCustomId('roster', 'page', String(Math.min(page + 1, totalPages - 1)), filterToken),
         )
         .setLabel('Successiva')
-        .setEmoji('▶️')
+        .setEmoji({ name: '▶️' })
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(page >= totalPages - 1),
     ),

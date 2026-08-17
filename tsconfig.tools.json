@@ -17,5 +17,5 @@
     "prisma.config.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": ["node_modules", "dist", "coverage", "src/worker/**"]
 }

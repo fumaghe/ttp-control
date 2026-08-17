@@ -19,6 +19,7 @@ import type {
   BlacklistEntry,
   DiscordProfile,
   GuildConfig,
+  GuildMemberSnapshotRow,
   Member,
   MemberHistory,
   MemberSpecialRole,
@@ -45,6 +46,8 @@ export interface InMemoryStore {
   audit: AuditLog[];
   guildConfig: Map<string, GuildConfig>;
   panels: Map<string, PersistentPanel>;
+  /** Chiave: `guildId:discordId`. */
+  snapshots: Map<string, GuildMemberSnapshotRow & { leftAt: Date | null; seenAt: Date }>;
 }
 
 export function createStore(): InMemoryStore {
@@ -59,6 +62,7 @@ export function createStore(): InMemoryStore {
     audit: [],
     guildConfig: new Map(),
     panels: new Map(),
+    snapshots: new Map(),
   };
 }
 
@@ -542,6 +546,46 @@ export function createInMemoryRepositories(store: InMemoryStore): Repositories {
         const updated = { ...existing, ...patch, updatedAt: now() };
         store.guildConfig.set(guildId, updated);
         return updated;
+      },
+    },
+
+    snapshots: {
+      async listForGuild(guildId): Promise<GuildMemberSnapshotRow[]> {
+        return [...store.snapshots.entries()]
+          .filter(([key]) => key.startsWith(`${guildId}:`))
+          .map(([, row]) => ({
+            discordId: row.discordId,
+            inGuild: row.inGuild,
+            roleIds: [...row.roleIds],
+            rolesHash: row.rolesHash,
+          }));
+      },
+
+      async countForGuild(guildId): Promise<number> {
+        return [...store.snapshots.keys()].filter((key) => key.startsWith(`${guildId}:`)).length;
+      },
+
+      async upsertMany(rows): Promise<void> {
+        for (const row of rows) {
+          store.snapshots.set(`${row.guildId}:${row.discordId}`, {
+            discordId: row.discordId,
+            inGuild: row.inGuild,
+            roleIds: [...row.roleIds],
+            rolesHash: row.rolesHash,
+            leftAt: null,
+            seenAt: row.seenAt,
+          });
+        }
+      },
+
+      async markLeft(guildId, discordId, at): Promise<void> {
+        const existing = store.snapshots.get(`${guildId}:${discordId}`);
+        if (!existing) return;
+        store.snapshots.set(`${guildId}:${discordId}`, {
+          ...existing,
+          inGuild: false,
+          leftAt: at,
+        });
       },
     },
 

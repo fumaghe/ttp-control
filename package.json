@@ -2,17 +2,18 @@
   "name": "ttp-control",
   "version": "0.1.0",
   "private": true,
-  "description": "TTP Control — gestionale Discord interno per la gang FiveM GTA RP \"TTP — Impero\"",
+  "description": "TTP Control \u2014 gestionale Discord interno per la gang FiveM GTA RP \"TTP \u2014 Impero\", su Cloudflare Workers",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
   },
-  "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "npm run prisma:generate && tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.tools.json --noEmit",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:tail": "wrangler tail",
+    "worker:build": "wrangler deploy --dry-run --outdir dist/worker",
+    "build": "npm run prisma:generate && npm run worker:build",
+    "typecheck": "tsc -p tsconfig.tools.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -29,16 +30,16 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@discordjs/builders": "1.14.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
-    "discord.js": "14.27.0",
-    "dotenv": "17.4.2",
-    "pino": "10.3.1",
-    "pino-pretty": "13.1.3"
+    "discord-api-types": "0.38.53"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260817.1",
     "@eslint/js": "10.0.1",
     "@types/node": "26.2.0",
+    "dotenv": "17.4.2",
     "eslint": "10.8.1",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.11.0",
@@ -47,7 +48,8 @@
     "tsx": "4.23.12",
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "wrangler": "4.123.0"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.1"

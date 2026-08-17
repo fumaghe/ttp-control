@@ -5,7 +5,8 @@
  * pubblicato dal bot in un canale della Leadership, ma questo non dice nulla
  * su chi sta premendo il bottone adesso.
  */
-import { ModalBuilder, type ModalSubmitInteraction, TextInputStyle } from 'discord.js';
+import { ModalBuilder } from '@discordjs/builders';
+import { TextInputStyle } from 'discord-api-types/v10';
 import { MemberRank } from '../../generated/prisma/enums.js';
 import { RANK_LABEL } from '../../config/constants.js';
 import { AppError, ERROR_CODE } from '../../errors/AppError.js';
@@ -25,11 +26,16 @@ async function refreshApplicationMessage(ctx: AppContext, applicationId: string)
   if (!application?.channelId || !application.messageId) return;
 
   const verification = await ctx.repos.verifications.findByDiscordId(application.discordId);
-  const channel = await ctx.client.channels.fetch(application.channelId).catch(() => null);
-  if (!channel?.isTextBased()) return;
 
-  const message = await channel.messages.fetch(application.messageId).catch(() => null);
-  await message?.edit(buildApplicationMessage(application, verification)).catch(() => undefined);
+  // Il messaggio potrebbe essere stato cancellato a mano: un refresh mancato
+  // non deve invalidare l'approvazione o il rifiuto appena registrati.
+  await ctx.gateway
+    .editMessage(
+      application.channelId,
+      application.messageId,
+      buildApplicationMessage(application, verification),
+    )
+    .catch(() => false);
 }
 
 export const applicationButtonHandler: ComponentHandler = {
@@ -62,7 +68,7 @@ export const applicationButtonHandler: ComponentHandler = {
             }),
           );
 
-        await interaction.showModal(modal);
+        await interaction.responder.showModal(modal);
       } catch (error) {
         await handleInteractionError(interaction, error, {
           operation: 'button:application:reject',
@@ -188,7 +194,7 @@ export const applicationButtonHandler: ComponentHandler = {
 export const applicationModalHandler: ModalHandler = {
   namespace: 'application',
 
-  async handle(interaction: ModalSubmitInteraction, parsed, ctx): Promise<void> {
+  async handle(interaction, parsed, ctx): Promise<void> {
     if (parsed.action !== 'rejectSubmit') return;
 
     await defer(interaction, { ephemeral: true });

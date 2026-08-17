@@ -321,6 +321,42 @@ export interface PersistentPanelRepository {
 }
 
 // -----------------------------------------------------------------------------
+// GuildMemberSnapshot
+// -----------------------------------------------------------------------------
+
+/**
+ * Lo stato Discord di un membro all'ultima osservazione.
+ *
+ * Volutamente ridotto ai soli campi necessari al confronto: la
+ * riconciliazione ne carica uno per ogni membro della guild, e caricare
+ * anche timestamp e metadati raddoppierebbe il traffico per niente.
+ */
+export interface GuildMemberSnapshotRow {
+  readonly discordId: string;
+  readonly inGuild: boolean;
+  readonly roleIds: readonly string[];
+  readonly rolesHash: string;
+}
+
+export interface GuildMemberSnapshotUpsert {
+  readonly guildId: string;
+  readonly discordId: string;
+  readonly inGuild: boolean;
+  readonly roleIds: readonly string[];
+  readonly rolesHash: string;
+  readonly nickname?: string | null;
+  readonly seenAt: Date;
+}
+
+export interface GuildMemberSnapshotRepository {
+  listForGuild(guildId: string): Promise<GuildMemberSnapshotRow[]>;
+  countForGuild(guildId: string): Promise<number>;
+  upsertMany(rows: readonly GuildMemberSnapshotUpsert[]): Promise<void>;
+  /** Marca il membro come uscito, senza cancellare la riga. */
+  markLeft(guildId: string, discordId: string, at: Date): Promise<void>;
+}
+
+// -----------------------------------------------------------------------------
 // Aggregato
 // -----------------------------------------------------------------------------
 
@@ -336,4 +372,5 @@ export interface Repositories {
   readonly audit: AuditRepository;
   readonly guildConfig: GuildConfigRepository;
   readonly panels: PersistentPanelRepository;
+  readonly snapshots: GuildMemberSnapshotRepository;
 }

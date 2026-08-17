@@ -6,7 +6,8 @@
  * guild (`GuildConfig.blacklistAutoKick` / `blacklistAutoBan`), disattivate
  * di default.
  */
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { PermissionFlagsBits } from 'discord-api-types/v10';
 import {
   escapeMarkdown,
   formatDate,

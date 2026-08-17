@@ -1,4 +1,5 @@
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { buildControlPanel } from '../components/embeds/controlPanel.js';
 import { handleInteractionError } from '../errors/handleInteractionError.js';
 import type { SlashCommand } from '../types/command.js';

@@ -1,0 +1,86 @@
+/**
+ * TTP CONTROL — configurazione Cloudflare Workers.
+ *
+ * QUI NON VANNO SECRET. Token e chiavi si caricano con:
+ *   npx wrangler secret put DISCORD_TOKEN
+ *   npx wrangler secret put DISCORD_PUBLIC_KEY
+ *
+ * Gli ID Discord in `vars` non sono segreti: identificano ruoli e canali di
+ * un server privato e non danno accesso a nulla da soli. Vanno comunque
+ * compilati con i valori del proprio server prima del deploy.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ttp-control",
+  "main": "src/worker/index.ts",
+
+  // Data di compatibilità: fissa il comportamento della runtime. Non
+  // spostarla senza rileggere il changelog di Cloudflare.
+  "compatibility_date": "2025-05-01",
+
+  // `nodejs_compat` serve al driver `pg` usato da @prisma/adapter-pg
+  // (node:events, node:stream, node:net per il socket verso Hyperdrive).
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    // Log accessibili da dashboard e `wrangler tail`, anche sul piano free.
+    "enabled": true,
+  },
+
+  // Riconciliazione dei membri: sostituisce guildMemberAdd/Remove/Update.
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+
+  // Hyperdrive: pool di connessioni gestito da Cloudflare davanti a Neon.
+  // Crealo con:
+  //   npx wrangler hyperdrive create ttp-control-neon --connection-string="<DIRECT_URL Neon>"
+  // e incolla qui l'id restituito.
+  // Finché l'id non è configurato il Worker ricade su DATABASE_URL.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "<hyperdrive-id>",
+      "localConnectionString": "postgresql://user:password@localhost:5432/ttp_control",
+    },
+  ],
+
+  "vars": {
+    "NODE_ENV": "production",
+    "LOG_LEVEL": "info",
+
+    // --- Identità dell'applicazione ---------------------------------------
+    "CLIENT_ID": "1538909559081541693",
+    "GUILD_ID": "1538885185029017682",
+    "OWNER_ID": "1090629136566988860",
+
+    // --- Ruoli -------------------------------------------------------------
+    "ROLE_VERIFIED_ID": "1538885185443991599",
+    "ROLE_TTP_ID": "1538885185443991595",
+    "ROLE_OG_ID": "1538885185456836692",
+    "ROLE_BIG_ID": "1538885185456836691",
+    "ROLE_YOUNG_OG_ID": "1538885185456836690",
+    "ROLE_GANGSTER_ID": "1538885185443991602",
+    "ROLE_RESIDENT_ID": "1538885185443991601",
+    "ROLE_FRIEND_ID": "1538885185443991600",
+    "ROLE_MAFIA_ID": "1538885185443991594",
+    "ROLE_BANNED_ID": "1538885185443991597",
+    "ROLE_INACTIVE_ID": "1538885185443991596",
+    "ROLE_PERMADEATH_ID": "1538885185431412802",
+    "ROLE_HONOR_1_ID": "1538885185443991593",
+    "ROLE_HONOR_2_ID": "1538885185431412805",
+    "ROLE_SUPPORTER_ID": "1538885185431412804",
+    "ROLE_FIRST_DAY_ID": "1538885185431412803",
+    "ROLE_SHOOTER_ID": "1538885185410572373",
+    "ROLE_MAIN_SHOOTER_ID": "1538885185410572372",
+
+    // --- Canali ------------------------------------------------------------
+    "CHANNEL_VERIFY_ID": "1538885186635432010",
+    "CHANNEL_VERIFY_REQUESTS_ID": "1538934453450182706",
+    "CHANNEL_MEMBER_MANAGEMENT_ID": "1538934610938036265",
+    "CHANNEL_MEMBER_LOGS_ID": "1538934673802264696",
+    "CHANNEL_AUDIT_LOG_ID": "1538934747676545054",
+    "CHANNEL_BLACKLIST_ID": "1538893121084203008",
+    "CHANNEL_CONTROL_PANEL_ID": "1538934817025167381",
+  },
+}

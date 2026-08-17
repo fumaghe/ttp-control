@@ -1,7 +1,8 @@
 /**
  * Bottoni del control panel e paginazione del roster.
  */
-import { ModalBuilder, type ModalSubmitInteraction, TextInputStyle } from 'discord.js';
+import { ModalBuilder } from '@discordjs/builders';
+import { TextInputStyle } from 'discord-api-types/v10';
 import { MemberStatus, type MemberRank } from '../../generated/prisma/enums.js';
 import { RANK_LABEL } from '../../config/constants.js';
 import { buildControlPanel } from '../../components/embeds/controlPanel.js';
@@ -41,7 +42,7 @@ export const panelButtonHandler: ComponentHandler = {
         const actor = await ctx.authorization.resolveActor(actorId);
         await ctx.authorization.require(actor, 'panel.use');
 
-        await interaction.showModal(
+        await interaction.responder.showModal(
           new ModalBuilder()
             .setCustomId(buildCustomId('panel', 'searchSubmit'))
             .setTitle('Cerca un membro')
@@ -190,7 +191,7 @@ export const panelButtonHandler: ComponentHandler = {
 export const panelModalHandler: ModalHandler = {
   namespace: 'panel',
 
-  async handle(interaction: ModalSubmitInteraction, parsed, ctx): Promise<void> {
+  async handle(interaction, parsed, ctx): Promise<void> {
     if (parsed.action !== 'searchSubmit') return;
     await defer(interaction, { ephemeral: true });
 
@@ -270,7 +271,7 @@ export const rosterButtonHandler: ComponentHandler = {
   async handle(interaction, parsed, ctx): Promise<void> {
     if (!interaction.isButton()) return;
     if (parsed.action === 'noop') {
-      await interaction.deferUpdate();
+      await interaction.responder.deferUpdate();
       return;
     }
     if (parsed.action !== 'page') return;

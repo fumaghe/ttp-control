@@ -4,7 +4,6 @@
  * Il ruolo `✅ Verified` viene assegnato al SUBMIT VALIDO del modal, non alla
  * pressione del bottone. Il bottone apre soltanto il form.
  */
-import type { ModalSubmitInteraction } from 'discord.js';
 import { successEmbed, warningEmbed } from '../../components/embeds/base.js';
 import { buildVerifyModal, VERIFY_FIELDS } from '../../components/embeds/verifyPanel.js';
 import { handleInteractionError } from '../../errors/handleInteractionError.js';
@@ -21,7 +20,7 @@ export const verifyButtonHandler: ComponentHandler = {
 
     try {
       // `showModal` e' gia' la risposta all'interaction: nessun defer prima.
-      await interaction.showModal(buildVerifyModal());
+      await interaction.responder.showModal(buildVerifyModal());
     } catch (error) {
       await handleInteractionError(interaction, error, {
         operation: 'button:verify:start',
@@ -34,7 +33,7 @@ export const verifyButtonHandler: ComponentHandler = {
 export const verifyModalHandler: ModalHandler = {
   namespace: 'verify',
 
-  async handle(interaction: ModalSubmitInteraction, parsed, ctx): Promise<void> {
+  async handle(interaction, parsed, ctx): Promise<void> {
     if (parsed.action !== 'submit') return;
 
     // La verifica tocca database e API Discord: prendiamo subito in carico
@@ -53,10 +52,7 @@ export const verifyModalHandler: ModalHandler = {
       const outcome = await ctx.verification.verify({
         discordId: interaction.user.id,
         username: interaction.user.username,
-        displayName:
-          interaction.member && 'displayName' in interaction.member
-            ? interaction.member.displayName
-            : interaction.user.displayName,
+        displayName: interaction.user.displayName,
         form,
       });
 

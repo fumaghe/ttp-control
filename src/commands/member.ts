@@ -6,7 +6,8 @@
  *
  * La logica vive nei service: qui si traduce fra Discord e dominio.
  */
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { MemberRank, MemberStatus, SpecialRole } from '../generated/prisma/enums.js';
 import { RANK_LABEL, RANK_ORDER } from '../config/constants.js';
 import { can, canActOn, canAssignRank, type Operation } from '../config/permissions.js';

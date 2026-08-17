@@ -2,18 +2,26 @@
  * Validazione e tipizzazione centralizzata dell'environment.
  *
  * Regole:
- *  - e' l'UNICO punto del runtime che legge `process.env` (con logger.ts);
  *  - lo startup si interrompe se manca una variabile fondamentale;
  *  - i secret non vengono MAI stampati, nemmeno in caso di errore;
  *  - ogni snowflake viene validato nel formato.
+ *
+ * NOTA runtime: questo modulo non importa nulla di specifico di Node, cosi'
+ * puo' girare identico sul Worker. La sorgente delle variabili e' un
+ * semplice dizionario: `process.env` su Node, il binding `Env` su Workers.
  */
-import { config as loadDotenv } from 'dotenv';
 
 /** Uno snowflake Discord: 17-20 cifre decimali. */
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
+/** Chiave pubblica Ed25519 dell'applicazione: 32 byte in esadecimale. */
+const PUBLIC_KEY_PATTERN = /^[0-9a-f]{64}$/i;
+
 /** Variabili il cui valore non deve mai comparire in un messaggio d'errore. */
-const SECRET_KEYS = new Set(['DISCORD_TOKEN', 'DATABASE_URL', 'DIRECT_URL']);
+const SECRET_KEYS = new Set(['DISCORD_TOKEN', 'DISCORD_PUBLIC_KEY', 'DATABASE_URL', 'DIRECT_URL']);
+
+/** Sorgente delle variabili d'ambiente: process.env, bindings del Worker, … */
+export type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -29,7 +37,8 @@ class EnvironmentError extends Error {
         '',
         ...problems.map((p) => `  - ${p}`),
         '',
-        'Copia .env.example in .env e completa i valori mancanti.',
+        'Compila i valori mancanti: `.env` in locale, `vars` di wrangler.jsonc',
+        'e `wrangler secret put` per i secret. Vedi .env.example.',
       ].join('\n'),
     );
     this.name = 'EnvironmentError';
@@ -40,9 +49,9 @@ class EnvironmentError extends Error {
 class EnvReader {
   private readonly problems: string[] = [];
 
-  private readonly source: NodeJS.ProcessEnv;
+  private readonly source: EnvSource;
 
-  public constructor(source: NodeJS.ProcessEnv) {
+  public constructor(source: EnvSource) {
     this.source = source;
   }
 
@@ -112,6 +121,30 @@ class EnvReader {
     return value;
   }
 
+  /**
+   * Chiave pubblica Ed25519 dell'applicazione Discord.
+   *
+   * NON e' il bot token: si trova nel Developer Portal sotto
+   * General Information → Public Key, ed e' cio' con cui si verifica la firma
+   * di ogni interaction HTTP. Non e' tecnicamente un segreto (e' pubblica),
+   * ma trattarla come tale nei messaggi d'errore non costa nulla.
+   */
+  public publicKey(key: string): string {
+    const value = this.raw(key);
+    if (value === undefined) {
+      this.problems.push(`${key} mancante`);
+      return '';
+    }
+    if (!PUBLIC_KEY_PATTERN.test(value)) {
+      this.problems.push(
+        `${key} deve essere la Public Key Ed25519 dell'applicazione: 64 caratteri esadecimali ` +
+          "(Developer Portal → General Information → Public Key). Non e' il bot token.",
+      );
+      return '';
+    }
+    return value.toLowerCase();
+  }
+
   public enum<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
     const value = this.raw(key);
     if (value === undefined) return fallback;
@@ -127,7 +160,7 @@ class EnvReader {
   }
 }
 
-function build(source: NodeJS.ProcessEnv) {
+function build(source: EnvSource) {
   const read = new EnvReader(source);
 
   const parsed = {
@@ -135,6 +168,8 @@ function build(source: NodeJS.ProcessEnv) {
     logLevel: read.enum('LOG_LEVEL', LOG_LEVELS, 'info'),
 
     discordToken: read.discordToken('DISCORD_TOKEN'),
+    /** Verifica della firma delle interaction HTTP. NON e' il bot token. */
+    discordPublicKey: read.publicKey('DISCORD_PUBLIC_KEY'),
     clientId: read.snowflake('CLIENT_ID'),
     guildId: read.snowflake('GUILD_ID'),
     ownerId: read.snowflake('OWNER_ID'),
@@ -187,22 +222,33 @@ function build(source: NodeJS.ProcessEnv) {
 
 export type Env = ReturnType<typeof build>;
 
-let cached: Env | undefined;
-
 /**
- * Carica e valida l'environment. Il risultato viene memorizzato: chiamate
- * successive non ripetono la validazione.
+ * Valida una sorgente di variabili e ne restituisce la versione tipizzata.
+ *
+ * Funzione pura, senza cache: e' quella usata dal Worker, dove ogni
+ * invocazione riceve i propri binding e non c'e' nessun `process` globale.
  *
  * @throws EnvironmentError se manca o e' malformata una variabile richiesta.
  */
-export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  if (!cached) {
-    // Caricato qui e non all'import del modulo: importare la config non deve
-    // avere effetti collaterali sull'ambiente (i test ne dipenderebbero).
-    // `quiet`: il banner di dotenv non e' JSON e sporcherebbe i log strutturati.
-    loadDotenv({ quiet: true });
-    cached = build(source);
-  }
+export function buildEnv(source: EnvSource): Env {
+  return build(source);
+}
+
+let cached: Env | undefined;
+
+/**
+ * Carica e valida l'environment da `process.env`. Il risultato viene
+ * memorizzato: chiamate successive non ripetono la validazione.
+ *
+ * Usata dagli script Node (`commands:deploy`); il Worker usa `buildEnv`.
+ *
+ * @throws EnvironmentError se manca o e' malformata una variabile richiesta.
+ */
+export function loadEnv(source?: EnvSource): Env {
+  // `process` viene letto dal globale invece che importato: cosi' il modulo
+  // resta compilabile anche con i soli tipi di Workers, dove non esiste.
+  const fallback = (globalThis as { process?: { env?: EnvSource } }).process?.env ?? {};
+  cached ??= build(source ?? fallback);
   return cached;
 }
 

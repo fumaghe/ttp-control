@@ -15,9 +15,13 @@ import { EnvironmentError, loadEnv, resetEnvCache } from '../../src/config/env.j
 const VALID_TOKEN = ['MTIzNDU2Nzg5MDEyMzQ1Njc4', 'GaBcDe', 'x'.repeat(30)].join('.');
 const VALID_URL = 'postgresql://user:supersecret@host.neon.tech/db?sslmode=require';
 
+/** Public Key Ed25519 fittizia: 32 byte in esadecimale. */
+const VALID_PUBLIC_KEY = 'ab'.repeat(32);
+
 function completeEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const base: Record<string, string> = {
     DISCORD_TOKEN: VALID_TOKEN,
+    DISCORD_PUBLIC_KEY: VALID_PUBLIC_KEY,
     CLIENT_ID: '100000000000000001',
     GUILD_ID: '100000000000000002',
     OWNER_ID: '100000000000000003',
@@ -68,6 +72,11 @@ describe('configurazione valida', () => {
     expect(env.roles.verified).toBe('200000000000000001');
     expect(env.roles.ttp).toBe('200000000000000002');
     expect(env.channels.verify).toBe('300000000000000001');
+  });
+
+  it('normalizza la public key in minuscolo', () => {
+    const env = loadEnv(completeEnv({ DISCORD_PUBLIC_KEY: VALID_PUBLIC_KEY.toUpperCase() }));
+    expect(env.discordPublicKey).toBe(VALID_PUBLIC_KEY);
   });
 
   it('DIRECT_URL è facoltativo', () => {
@@ -138,6 +147,24 @@ describe('configurazione malformata', () => {
       expect(message).toContain('DISCORD_TOKEN');
       expect(message).not.toContain('token-corto-ma-segreto');
     }
+  });
+
+  it('rifiuta una DISCORD_PUBLIC_KEY che non è esadecimale a 64 caratteri', () => {
+    // L'errore tipico: incollare il bot token al posto della public key.
+    try {
+      loadEnv(completeEnv({ DISCORD_PUBLIC_KEY: VALID_TOKEN }));
+      expect.unreachable('avrebbe dovuto lanciare');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('DISCORD_PUBLIC_KEY');
+      expect(message).toContain('Public Key');
+      // È un secret nell'elenco: il valore non deve mai comparire.
+      expect(message).not.toContain(VALID_TOKEN);
+    }
+  });
+
+  it('fallisce se manca DISCORD_PUBLIC_KEY', () => {
+    expect(() => loadEnv(completeEnv({ DISCORD_PUBLIC_KEY: undefined }))).toThrow(EnvironmentError);
   });
 
   it('rifiuta un LOG_LEVEL sconosciuto', () => {

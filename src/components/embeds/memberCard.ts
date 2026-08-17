@@ -5,7 +5,8 @@
  * viene comunque RIFATTA al click: un pannello mostrato una volta non è un
  * lasciapassare permanente.
  */
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, type EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, type EmbedBuilder } from '@discordjs/builders';
+import { ButtonStyle } from 'discord-api-types/v10';
 import { MemberStatus, type SpecialRole } from '../../generated/prisma/enums.js';
 import { EMBED_COLOR, RANK_LABEL } from '../../config/constants.js';
 import type { Member } from '../../repositories/types.js';
@@ -125,7 +126,7 @@ export function buildMemberActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('member', 'promote', discordId))
         .setLabel('PROMOTE')
-        .setEmoji('⬆️')
+        .setEmoji({ name: '⬆️' })
         .setStyle(ButtonStyle.Success),
     );
   }
@@ -134,7 +135,7 @@ export function buildMemberActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('member', 'demote', discordId))
         .setLabel('DEMOTE')
-        .setEmoji('⬇️')
+        .setEmoji({ name: '⬇️' })
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -143,7 +144,7 @@ export function buildMemberActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('member', 'roles', discordId))
         .setLabel('ROLES')
-        .setEmoji('🎭')
+        .setEmoji({ name: '🎭' })
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -159,7 +160,7 @@ export function buildMemberActions(
           ),
         )
         .setLabel(status === MemberStatus.INACTIVE ? 'RIATTIVA' : 'INACTIVE')
-        .setEmoji(status === MemberStatus.INACTIVE ? '🟢' : '💤')
+        .setEmoji({ name: status === MemberStatus.INACTIVE ? '🟢' : '💤' })
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -168,7 +169,7 @@ export function buildMemberActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('member', 'notes', discordId))
         .setLabel('NOTES')
-        .setEmoji('📝')
+        .setEmoji({ name: '📝' })
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -177,7 +178,7 @@ export function buildMemberActions(
       new ButtonBuilder()
         .setCustomId(buildCustomId('member', 'remove', discordId))
         .setLabel('REMOVE')
-        .setEmoji('🚪')
+        .setEmoji({ name: '🚪' })
         .setStyle(ButtonStyle.Danger),
     );
   }

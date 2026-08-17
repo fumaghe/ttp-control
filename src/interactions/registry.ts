@@ -18,14 +18,14 @@ import { systemCommand } from '../commands/system.js';
 import {
   applicationButtonHandler,
   applicationModalHandler,
-} from '../interactions/applications/applicationHandlers.js';
-import { memberButtonHandler, memberModalHandler } from '../interactions/members/memberHandlers.js';
+} from './applications/applicationHandlers.js';
+import { memberButtonHandler, memberModalHandler } from './members/memberHandlers.js';
 import {
   panelButtonHandler,
   panelModalHandler,
   rosterButtonHandler,
-} from '../interactions/panels/panelHandlers.js';
-import { verifyButtonHandler, verifyModalHandler } from '../interactions/verify/verifyHandlers.js';
+} from './panels/panelHandlers.js';
+import { verifyButtonHandler, verifyModalHandler } from './verify/verifyHandlers.js';
 
 import type { ComponentHandler, ModalHandler, SlashCommand } from '../types/command.js';
 

@@ -1,12 +1,13 @@
 /**
  * Costruzione dei campi dei modal.
  *
- * discord.js 14.27 ha spostato l'etichetta dal `TextInputBuilder` a un
+ * Discord ha spostato l'etichetta dal `TextInputBuilder` a un
  * `LabelBuilder` che lo avvolge (`TextInputBuilder.setLabel` e
  * `ModalBuilder.addComponents` sono deprecati). Questo helper concentra la
  * nuova forma in un punto solo, così i modal restano leggibili.
  */
-import { LabelBuilder, TextInputBuilder, type TextInputStyle } from 'discord.js';
+import { LabelBuilder, TextInputBuilder } from '@discordjs/builders';
+import type { TextInputStyle } from 'discord-api-types/v10';
 
 export interface TextFieldOptions {
   readonly customId: string;
