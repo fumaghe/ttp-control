@@ -1,0 +1,21 @@
+{
+  /*
+   * Type-check configuration for everything that is NOT shipped in `dist/`:
+   * tests, scripts and root-level config files.
+   * Used by `npm run typecheck`, ESLint and Vitest.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "prisma.config.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

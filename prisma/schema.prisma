@@ -1,0 +1,124 @@
+// =============================================================================
+// TTP CONTROL — Prisma schema
+// =============================================================================
+// Provider : PostgreSQL (Neon)
+// ORM      : Prisma 7 — generator `prisma-client`, driver adapter `@prisma/adapter-pg`
+//
+// NOTA Prisma 7: il blocco `datasource` non contiene piu' `url` / `directUrl`.
+// La connection string per la CLI e' definita in `prisma.config.ts`;
+// quella di runtime viene passata al driver adapter in `src/database/prisma.ts`.
+//
+// I modelli di dominio (DiscordProfile, Verification, TtpApplication, Member,
+// BlacklistEntry, MemberHistory, AuditLog, GuildConfig, PersistentPanel)
+// verranno introdotti nella Phase 1. Qui definiamo solo gli enum del dominio,
+// che sono gia' stabili e servono da contratto per tutto il progetto.
+// =============================================================================
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  runtime             = "nodejs"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Gerarchia TTP: RESIDENT -> GANGSTER -> YOUNG_OG -> BIG -> OG
+// -----------------------------------------------------------------------------
+enum MemberRank {
+  RESIDENT
+  GANGSTER
+  YOUNG_OG
+  BIG
+  OG
+}
+
+// -----------------------------------------------------------------------------
+// Stato di un membro della gang.
+// -----------------------------------------------------------------------------
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  PERMADEATH
+  LEFT
+}
+
+// -----------------------------------------------------------------------------
+// Ciclo di vita di una candidatura d'ingresso nella gang.
+// Al massimo una PENDING per discordId (vincolo applicato in Phase 1).
+// -----------------------------------------------------------------------------
+enum TtpApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// -----------------------------------------------------------------------------
+// Ruoli speciali gestiti da /member roles.
+// Non includono MAI membership (Verified/TTP), rank, stati o relazioni:
+// quelli hanno workflow dedicati.
+// -----------------------------------------------------------------------------
+enum SpecialRole {
+  SHOOTER
+  MAIN_SHOOTER
+  HONOR_1
+  HONOR_2
+  SUPPORTER
+  FIRST_DAY
+}
+
+// -----------------------------------------------------------------------------
+// Eventi significativi nella storia di un membro.
+// -----------------------------------------------------------------------------
+enum MemberHistoryEvent {
+  JOINED_TTP
+  LEFT_TTP
+  PROMOTED
+  DEMOTED
+  RANK_CHANGED
+  SET_INACTIVE
+  SET_ACTIVE
+  SPECIAL_ROLE_ADDED
+  SPECIAL_ROLE_REMOVED
+  PERMADEATH
+}
+
+// -----------------------------------------------------------------------------
+// Azioni tracciate dall'audit system (Phase 3).
+// -----------------------------------------------------------------------------
+enum AuditAction {
+  USER_VERIFIED
+  TTP_APPLICATION_CREATED
+  TTP_APPLICATION_APPROVED
+  TTP_APPLICATION_REJECTED
+  TTP_ADDED
+  TTP_REMOVED
+  PROMOTED
+  DEMOTED
+  RANK_CHANGED
+  SPECIAL_ROLE_ADDED
+  SPECIAL_ROLE_REMOVED
+  SET_INACTIVE
+  SET_ACTIVE
+  BLACKLISTED
+  UNBLACKLISTED
+  PERMADEATH
+  KICKED
+  BANNED
+  ROLE_SYNC_WARNING
+  MEMBER_JOINED_DISCORD
+  MEMBER_LEFT_DISCORD
+}
+
+// -----------------------------------------------------------------------------
+// Tipi di pannello persistente (evita duplicati dopo un restart).
+// -----------------------------------------------------------------------------
+enum PanelType {
+  VERIFY
+  CONTROL_PANEL
+}
