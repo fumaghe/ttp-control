@@ -16,6 +16,13 @@ export interface ApiUser {
   readonly global_name?: string | null;
   readonly discriminator?: string;
   readonly bot?: boolean;
+  /**
+   * Hash dell'immagine profilo, `null` se l'utente non ne ha una.
+   *
+   * NON e' un URL: si compone con `src/discord/avatar.ts`, che e' l'unico
+   * punto che conosce la forma del CDN Discord.
+   */
+  readonly avatar?: string | null;
 }
 
 export interface ApiGuildMember {

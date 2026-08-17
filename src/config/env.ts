@@ -213,6 +213,10 @@ function build(source: EnvSource) {
       auditLog: read.snowflake('CHANNEL_AUDIT_LOG_ID'),
       blacklist: read.snowflake('CHANNEL_BLACKLIST_ID'),
       controlPanel: read.snowflake('CHANNEL_CONTROL_PANEL_ID'),
+      /** Messaggi automatici di benvenuto (riconciliazione: nuovo membro). */
+      welcome: read.snowflake('CHANNEL_WELCOME_ID'),
+      /** Messaggi automatici di addio (riconciliazione: membro uscito). */
+      goodbye: read.snowflake('CHANNEL_GOODBYE_ID'),
     },
   } as const;
 

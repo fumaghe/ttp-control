@@ -336,6 +336,14 @@ export interface GuildMemberSnapshotRow {
   readonly inGuild: boolean;
   readonly roleIds: readonly string[];
   readonly rolesHash: string;
+  /**
+   * Nome mostrato all'ultima osservazione.
+   *
+   * E' l'unico modo di dire CHI ha lasciato il server: quando la
+   * riconciliazione se ne accorge, il membro non e' piu' interrogabile nella
+   * guild. La colonna esiste gia' a schema — nessuna migration.
+   */
+  readonly nickname?: string | null;
 }
 
 export interface GuildMemberSnapshotUpsert {

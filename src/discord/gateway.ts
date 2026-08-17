@@ -18,6 +18,7 @@ import {
   type ApiGuildMember,
   type ApiMessage,
   type ApiRole,
+  type ApiUser,
   computeChannelPermissions,
   computeGuildPermissions,
   DISCORD_ERROR_CODE,
@@ -64,6 +65,16 @@ export interface DiscordGateway extends RoleGateway, ModerationGateway, PanelMes
   getSelfUserId(): Promise<Snowflake>;
 
   getMember(discordId: Snowflake): Promise<GuildMemberSnapshot | null>;
+  /**
+   * Utente Discord globale, indipendente dalla guild.
+   *
+   * Serve dove il membro non c'e' (piu'): il goodbye viene costruito dopo che
+   * l'utente ha lasciato il server, quindi `GET /guilds/{id}/members/{id}`
+   * risponderebbe 404.
+   *
+   * @returns `null` se l'utente non esiste.
+   */
+  getUser(discordId: Snowflake): Promise<ApiUser | null>;
   /** Enumerazione completa, con paginazione. Richiede il Server Members Intent. */
   listMembers(): Promise<GuildMemberSnapshot[]>;
   listMembersWithAnyRole(roleIds: readonly Snowflake[]): Promise<GuildMemberSnapshot[]>;
@@ -111,6 +122,11 @@ function snapshotOf(
     roleIds: new Set(member.roles),
     highestRolePosition: highest,
     isGuildOwner: discordId === guildOwnerId,
+    // Portati nello snapshot perche' l'enumerazione del cron li ha gia': senza
+    // di questi il messaggio di benvenuto dovrebbe rifare una GET /users per
+    // ogni nuovo membro.
+    bot: user?.bot ?? false,
+    avatar: user?.avatar ?? null,
   };
 }
 
@@ -222,6 +238,20 @@ export function createDiscordRestGateway(options: DiscordGatewayOptions): Discor
     async getMember(discordId): Promise<GuildMemberSnapshot | null> {
       const member = await fetchMember(discordId);
       return member ? toSnapshot(member) : null;
+    },
+
+    /**
+     * `GET /users/{user.id}`: dato globale, non serve condividere una guild
+     * con l'utente. E' cio' che rende possibile mostrare l'avatar di chi ha
+     * appena lasciato il server senza salvarlo a database.
+     */
+    async getUser(discordId): Promise<ApiUser | null> {
+      try {
+        return await rest.get<ApiUser>(`/users/${discordId}`);
+      } catch (error) {
+        if (isNotFound(error, DISCORD_ERROR_CODE.UNKNOWN_USER)) return null;
+        throw error;
+      }
     },
 
     fetchMember(discordId): Promise<GuildMemberSnapshot | null> {

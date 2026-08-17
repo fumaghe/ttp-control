@@ -16,6 +16,20 @@ export interface GuildMemberSnapshot {
   /** Posizione del ruolo piu' alto: serve per la gerarchia Discord reale. */
   readonly highestRolePosition: number;
   readonly isGuildOwner: boolean;
+
+  /**
+   * L'account e' un bot. `undefined` quando la sorgente non lo sa dire.
+   *
+   * Opzionale di proposito: aggiungerlo come obbligatorio avrebbe rotto ogni
+   * costruttore di snapshot esistente per un dato che serve solo a decidere
+   * se un messaggio di benvenuto ha senso.
+   */
+  readonly bot?: boolean | undefined;
+  /**
+   * Hash dell'avatar utente (non l'URL, non l'avatar per-server).
+   * `undefined` = non noto, `null` = l'utente usa l'avatar di default.
+   */
+  readonly avatar?: string | null | undefined;
 }
 
 /** Operazioni sui ruoli, con il controllo di gerarchia gia' incorporato. */
