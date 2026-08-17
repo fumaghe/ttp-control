@@ -25,6 +25,10 @@ export interface ChannelRegistry {
   readonly auditLog: string;
   readonly blacklist: string;
   readonly controlPanel: string;
+  /** Benvenuto pubblico ai nuovi membri del Discord. */
+  readonly welcome: string;
+  /** Saluto pubblico a chi lascia il Discord (NON chi lascia la gang). */
+  readonly goodbye: string;
   readonly all: readonly ChannelDescriptor[];
 }
 
@@ -49,6 +53,8 @@ export function buildChannelRegistry(env: Env): ChannelRegistry {
     { key: 'auditLog', id: c.auditLog, label: 'Audit Log', requiresSend: true },
     { key: 'blacklist', id: c.blacklist, label: 'Blacklist', requiresSend: true },
     { key: 'controlPanel', id: c.controlPanel, label: 'Control Panel', requiresSend: true },
+    { key: 'welcome', id: c.welcome, label: 'Welcome Channel', requiresSend: true },
+    { key: 'goodbye', id: c.goodbye, label: 'Goodbye Channel', requiresSend: true },
   ];
 
   return {
@@ -59,6 +65,8 @@ export function buildChannelRegistry(env: Env): ChannelRegistry {
     auditLog: c.auditLog,
     blacklist: c.blacklist,
     controlPanel: c.controlPanel,
+    welcome: c.welcome,
+    goodbye: c.goodbye,
     all,
   };
 }

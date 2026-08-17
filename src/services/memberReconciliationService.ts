@@ -30,6 +30,7 @@ import type {
 import { createLogger } from '../utils/logger.js';
 import type { AuditService } from './auditService.js';
 import type { BlacklistService } from './blacklistService.js';
+import type { MemberLifecycleMessageService } from './memberLifecycleMessageService.js';
 import type { GuildMemberSnapshot } from './roleGateway.js';
 import type { RoleService } from './roleService.js';
 
@@ -47,6 +48,10 @@ export interface ReconciliationReport {
   readonly blacklistedRejoins: number;
   /** Membri il cui trattamento è fallito: riprovati alla prossima esecuzione. */
   readonly failures: number;
+  /** Messaggi di benvenuto effettivamente pubblicati (best-effort). */
+  readonly welcomeMessages: number;
+  /** Messaggi di addio effettivamente pubblicati (best-effort). */
+  readonly goodbyeMessages: number;
   /**
    * Prima esecuzione su una guild senza snapshot: lo stato viene fotografato
    * SENZA emettere eventi di join, che sarebbero centinaia di falsi positivi.
@@ -88,12 +93,17 @@ export interface ReconciliationDeps {
   readonly blacklist: BlacklistService;
   readonly listAllGuildMembers: () => Promise<GuildMemberSnapshot[]>;
   readonly guildId: string;
+  /**
+   * Messaggi pubblici di benvenuto/addio. Opzionale: senza, la
+   * riconciliazione si comporta esattamente come prima di questa feature.
+   */
+  readonly lifecycle?: MemberLifecycleMessageService | undefined;
 }
 
 export function createMemberReconciliationService(
   deps: ReconciliationDeps,
 ): MemberReconciliationService {
-  const { repos, roles, roleRegistry, audit, blacklist, guildId } = deps;
+  const { repos, roles, roleRegistry, audit, blacklist, lifecycle, guildId } = deps;
 
   /**
    * Sostituisce `guildMemberAdd`.
@@ -277,6 +287,53 @@ export function createMemberReconciliationService(
     return { warned: true };
   }
 
+  /**
+   * Messaggi pubblici di benvenuto e addio.
+   *
+   * BEST-EFFORT, e in fondo alla riconciliazione di proposito: viene chiamata
+   * solo dopo che audit e snapshot sono stati scritti, quindi un messaggio
+   * non recapitato non può far ritrattare l'evento alla prossima esecuzione.
+   * Non lancia mai — il lifecycle service è già a prova di errore, e il
+   * `catch` qui copre anche un'implementazione che non lo fosse.
+   */
+  async function dispatchLifecycleMessages(
+    welcomes: readonly GuildMemberSnapshot[],
+    goodbyes: readonly GuildMemberSnapshotRow[],
+  ): Promise<{ welcome: number; goodbye: number }> {
+    if (!lifecycle) return { welcome: 0, goodbye: 0 };
+
+    let welcome = 0;
+    let goodbye = 0;
+
+    for (const snapshot of welcomes) {
+      try {
+        const sent = await lifecycle.sendWelcome({
+          discordId: snapshot.discordId,
+          bot: snapshot.bot,
+          avatar: snapshot.avatar,
+        });
+        if (sent) welcome += 1;
+      } catch (error) {
+        log.error({ err: error, discordId: snapshot.discordId }, 'Benvenuto non inviato');
+      }
+    }
+
+    for (const previous of goodbyes) {
+      try {
+        const sent = await lifecycle.sendGoodbye({
+          discordId: previous.discordId,
+          // Il nome dell'ultima osservazione: dopo l'uscita non è più leggibile.
+          displayName: previous.nickname ?? previous.discordId,
+        });
+        if (sent) goodbye += 1;
+      } catch (error) {
+        log.error({ err: error, discordId: previous.discordId }, 'Messaggio di addio non inviato');
+      }
+    }
+
+    return { welcome, goodbye };
+  }
+
   return {
     async run(): Promise<ReconciliationReport> {
       const startedAt = Date.now();
@@ -305,6 +362,9 @@ export function createMemberReconciliationService(
           })),
         );
 
+        // NESSUN benvenuto qui: il seed non è un'ondata di arrivi, è la
+        // fotografia di chi c'era già. Mandarli significherebbe taggare
+        // l'intero server al primo cron.
         log.info({ members: current.length }, 'Snapshot iniziale della guild registrato');
         return {
           scanned: current.length,
@@ -314,6 +374,8 @@ export function createMemberReconciliationService(
           warnings: 0,
           blacklistedRejoins: 0,
           failures: 0,
+          welcomeMessages: 0,
+          goodbyeMessages: 0,
           seeded: true,
           durationMs: Date.now() - startedAt,
         };
@@ -328,6 +390,12 @@ export function createMemberReconciliationService(
 
       const toPersist: Parameters<GuildMemberSnapshotRepository['upsertMany']>[0][number][] = [];
 
+      // I messaggi pubblici si accumulano qui e partono SOLO a stato scritto:
+      // così un canale mal configurato non può far ritrattare lo stesso join
+      // a ogni esecuzione del cron. Vedi `dispatchLifecycleMessages`.
+      const pendingWelcomes: GuildMemberSnapshot[] = [];
+      const pendingGoodbyes: GuildMemberSnapshotRow[] = [];
+
       // --- Lato Discord: presenti adesso ----------------------------------
       for (const snapshot of current) {
         const previous = previousById.get(snapshot.discordId);
@@ -337,7 +405,13 @@ export function createMemberReconciliationService(
           if (!previous?.inGuild) {
             joined += 1;
             const outcome = await handleJoin(snapshot, previous !== undefined);
-            if (outcome.blacklisted) blacklistedRejoins += 1;
+            if (outcome.blacklisted) {
+              blacklistedRejoins += 1;
+              // La blacklist ha la precedenza: chi è bandito rientra in
+              // silenzio, non con un benvenuto pubblico.
+            } else {
+              pendingWelcomes.push(snapshot);
+            }
           } else if (previous.rolesHash !== rolesHash) {
             roleChanges += 1;
             const outcome = await handleRoleChange(snapshot, previous);
@@ -374,6 +448,7 @@ export function createMemberReconciliationService(
           const outcome = await handleLeave(previous);
           if (outcome.warned) warnings += 1;
           await repos.snapshots.markLeft(guildId, previous.discordId, now);
+          pendingGoodbyes.push(previous);
         } catch (error) {
           failures += 1;
           log.error(
@@ -385,6 +460,10 @@ export function createMemberReconciliationService(
 
       if (toPersist.length > 0) await repos.snapshots.upsertMany(toPersist);
 
+      // Ultimo passo, a stato già scritto: da qui in poi nessun errore può
+      // più annullare una riconciliazione già avvenuta.
+      const messages = await dispatchLifecycleMessages(pendingWelcomes, pendingGoodbyes);
+
       const report: ReconciliationReport = {
         scanned: current.length,
         joined,
@@ -393,6 +472,8 @@ export function createMemberReconciliationService(
         warnings,
         blacklistedRejoins,
         failures,
+        welcomeMessages: messages.welcome,
+        goodbyeMessages: messages.goodbye,
         seeded: false,
         durationMs: Date.now() - startedAt,
       };

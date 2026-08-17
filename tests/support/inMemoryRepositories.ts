@@ -558,6 +558,7 @@ export function createInMemoryRepositories(store: InMemoryStore): Repositories {
             inGuild: row.inGuild,
             roleIds: [...row.roleIds],
             rolesHash: row.rolesHash,
+            nickname: row.nickname ?? null,
           }));
       },
 
@@ -572,6 +573,7 @@ export function createInMemoryRepositories(store: InMemoryStore): Repositories {
             inGuild: row.inGuild,
             roleIds: [...row.roleIds],
             rolesHash: row.rolesHash,
+            nickname: row.nickname ?? null,
             leftAt: null,
             seenAt: row.seenAt,
           });

@@ -9,13 +9,14 @@
 import { buildChannelRegistry } from '../../src/config/channels.js';
 import type { DiscordGateway } from '../../src/discord/gateway.js';
 import type { MessagePayload } from '../../src/discord/payload.js';
+import { createMemberLifecycleMessageService } from '../../src/services/memberLifecycleMessageService.js';
 import { createMemberReconciliationService } from '../../src/services/memberReconciliationService.js';
 import { createPanelService } from '../../src/services/panelService.js';
 import { createStatsService } from '../../src/services/statsService.js';
 import type { GuildMemberSnapshot } from '../../src/services/roleGateway.js';
 import type { AppContext } from '../../src/types/context.js';
 import type { Database } from '../../src/database/prisma.js';
-import { createHarness, GUILD_ID, type Harness } from './harness.js';
+import { createHarness, GUILD_ID, snapshotOf, type Harness } from './harness.js';
 
 export interface SentMessage {
   readonly channelId: string;
@@ -44,16 +45,7 @@ export function createTestAppContext(): TestAppContext {
   const deletedMessages = new Set<string>();
 
   const snapshots = (): GuildMemberSnapshot[] =>
-    [...harness.guild.members.values()]
-      .filter((member) => member.present)
-      .map((member) => ({
-        discordId: member.discordId,
-        username: member.username,
-        displayName: member.displayName,
-        roleIds: new Set(member.roles),
-        highestRolePosition: member.highestRolePosition,
-        isGuildOwner: member.isGuildOwner,
-      }));
+    [...harness.guild.members.values()].filter((member) => member.present).map(snapshotOf);
 
   const gateway = {
     ...harness.gateway,
@@ -67,6 +59,14 @@ export function createTestAppContext(): TestAppContext {
     getSelfUserId: () => Promise.resolve(harness.env.clientId),
 
     getMember: (discordId: string) => harness.gateway.fetchMember(discordId),
+    getUser: (discordId: string) => {
+      const member = harness.guild.members.get(discordId);
+      return Promise.resolve(
+        member
+          ? { id: member.discordId, username: member.username, bot: member.bot, avatar: null }
+          : null,
+      );
+    },
     listMembers: () => Promise.resolve(snapshots()),
     listMembersWithAnyRole: (roleIds: readonly string[]) =>
       Promise.resolve(snapshots().filter((s) => roleIds.some((id) => s.roleIds.has(id)))),
@@ -107,6 +107,10 @@ export function createTestAppContext(): TestAppContext {
     roleRegistry: harness.roles,
     audit: harness.audit,
     blacklist: harness.blacklist,
+    lifecycle: createMemberLifecycleMessageService({
+      messages: gateway,
+      channels: { welcome: channels.welcome, goodbye: channels.goodbye },
+    }),
     listAllGuildMembers: () => Promise.resolve(snapshots()),
     guildId: GUILD_ID,
   });

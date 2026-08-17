@@ -23,6 +23,7 @@ import { createAuthorizationService } from '../services/authorizationService.js'
 import { createBlacklistService } from '../services/blacklistService.js';
 import { createCommunityService } from '../services/communityService.js';
 import { createConsistencyService } from '../services/consistencyService.js';
+import { createMemberLifecycleMessageService } from '../services/memberLifecycleMessageService.js';
 import { createMemberReconciliationService } from '../services/memberReconciliationService.js';
 import { createMemberService } from '../services/memberService.js';
 import { createPanelService } from '../services/panelService.js';
@@ -160,12 +161,20 @@ export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
     listAllGuildMembers: () => gateway.listMembers(),
   });
 
+  // Benvenuto e addio: la riconciliazione si limita a dire chi è entrato e chi
+  // è uscito, la costruzione del messaggio vive qui dentro.
+  const lifecycle = createMemberLifecycleMessageService({
+    messages: gateway,
+    channels: { welcome: channels.welcome, goodbye: channels.goodbye },
+  });
+
   const reconciliation = createMemberReconciliationService({
     repos,
     roles: roleService,
     roleRegistry: roles,
     audit,
     blacklist,
+    lifecycle,
     listAllGuildMembers: () => gateway.listMembers(),
     guildId: env.guildId,
   });

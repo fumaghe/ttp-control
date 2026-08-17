@@ -13,13 +13,20 @@ export function createGuildMemberSnapshotRepository(db: Database): GuildMemberSn
     async listForGuild(guildId): Promise<GuildMemberSnapshotRow[]> {
       const rows = await db.guildMemberSnapshot.findMany({
         where: { guildId },
-        select: { discordId: true, inGuild: true, roleIds: true, rolesHash: true },
+        select: {
+          discordId: true,
+          inGuild: true,
+          roleIds: true,
+          rolesHash: true,
+          nickname: true,
+        },
       });
       return rows.map((row) => ({
         discordId: row.discordId,
         inGuild: row.inGuild,
         roleIds: row.roleIds,
         rolesHash: row.rolesHash,
+        nickname: row.nickname,
       }));
     },
 

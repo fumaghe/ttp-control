@@ -70,6 +70,8 @@ function bindings(overrides: Record<string, string> = {}): Record<string, string
     CHANNEL_AUDIT_LOG_ID: '300000000000000005',
     CHANNEL_BLACKLIST_ID: '300000000000000006',
     CHANNEL_CONTROL_PANEL_ID: '300000000000000007',
+    CHANNEL_WELCOME_ID: '300000000000000008',
+    CHANNEL_GOODBYE_ID: '300000000000000009',
     ...overrides,
   };
 }

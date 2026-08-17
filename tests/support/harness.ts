@@ -52,7 +52,7 @@ export const ROLE_IDS = {
   mainShooter: '200000000000000018',
 } as const;
 
-const CHANNEL_IDS = {
+export const CHANNEL_IDS = {
   verify: '300000000000000001',
   verifyRequests: '300000000000000002',
   memberManagement: '300000000000000003',
@@ -60,6 +60,8 @@ const CHANNEL_IDS = {
   auditLog: '300000000000000005',
   blacklist: '300000000000000006',
   controlPanel: '300000000000000007',
+  welcome: '300000000000000008',
+  goodbye: '300000000000000009',
 } as const;
 
 export function testEnv(): Env {
@@ -90,6 +92,10 @@ export interface FakeMember {
   isGuildOwner: boolean;
   /** Se `false`, il gateway si comporta come se avesse lasciato il server. */
   present: boolean;
+  /** Gli account bot non ricevono messaggi di benvenuto/addio. */
+  bot: boolean;
+  /** Hash dell'avatar: `null` = l'utente usa quello di default. */
+  avatar: string | null;
 }
 
 export interface FakeGuild {
@@ -112,6 +118,8 @@ export function addFakeMember(
     position?: number;
     isGuildOwner?: boolean;
     displayName?: string;
+    bot?: boolean;
+    avatar?: string | null;
   } = {},
 ): FakeMember {
   const member: FakeMember = {
@@ -122,12 +130,14 @@ export function addFakeMember(
     highestRolePosition: options.position ?? 1,
     isGuildOwner: options.isGuildOwner ?? false,
     present: true,
+    bot: options.bot ?? false,
+    avatar: options.avatar ?? null,
   };
   guild.members.set(discordId, member);
   return member;
 }
 
-function snapshotOf(member: FakeMember): GuildMemberSnapshot {
+export function snapshotOf(member: FakeMember): GuildMemberSnapshot {
   return {
     discordId: member.discordId,
     username: member.username,
@@ -135,6 +145,8 @@ function snapshotOf(member: FakeMember): GuildMemberSnapshot {
     roleIds: new Set(member.roles),
     highestRolePosition: member.highestRolePosition,
     isGuildOwner: member.isGuildOwner,
+    bot: member.bot,
+    avatar: member.avatar,
   };
 }
 

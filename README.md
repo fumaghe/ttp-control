@@ -707,6 +707,28 @@ Tre proprietà che rendono il cron sicuro da ripetere:
 3. **Idempotenza.** Una seconda esecuzione senza cambiamenti non produce
    nessun evento.
 
+### Messaggi di benvenuto e addio
+
+Dagli stessi eventi dedotti nascono due messaggi pubblici, in
+`CHANNEL_WELCOME_ID` e `CHANNEL_GOODBYE_ID`. Li costruisce
+`MemberLifecycleMessageService`: la riconciliazione si limita a dire *chi* è
+entrato e *chi* è uscito.
+
+- **Nessun messaggio durante il seed iniziale**: il seed fotografa chi c'era
+  già, non è un'ondata di arrivi.
+- **La blacklist ha la precedenza**: chi rientra ed è in blacklist non riceve
+  nessun benvenuto pubblico; l'alert alla Leadership resta invariato.
+- **Niente messaggi per i bot**, in entrata e in uscita quando è determinabile.
+- Il goodbye parla **solo del server Discord**. Uscire dal Discord non è
+  lasciare TTP: nessuna membership, nessun ruolo, nessun audit cambia.
+- **Best-effort.** Un errore d'invio viene loggato e basta: i messaggi partono
+  *dopo* che audit e snapshot sono stati scritti, quindi un canale mal
+  configurato non può far ritrattare all'infinito lo stesso join.
+
+L'avatar è mostrato in grande (`setImage`) e risolto dal CDN ufficiale
+Discord. Per il goodbye l'utente non è più nella guild, quindi il profilo
+arriva da `GET /users/{id}` — nessuna colonna nuova a database.
+
 Il cron è la ragione per cui il progetto sta comodamente nel piano gratuito:
 288 esecuzioni al giorno, ognuna con una manciata di richieste (l'enumerazione
 dei membri è paginata a 1000 per pagina — per una guild privata è una sola
