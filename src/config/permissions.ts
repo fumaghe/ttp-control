@@ -77,8 +77,15 @@ export interface ActorContext {
   readonly isBotOwner: boolean;
   /** Proprietario della guild Discord. */
   readonly isGuildOwner: boolean;
+  /** Possiede `RUOLO TTP`. Senza, nessun rank vale ai fini dei permessi. */
   readonly isTtp: boolean;
-  readonly rank: MemberRank | undefined;
+  /**
+   * TUTTI i rank posseduti su Discord, non "il rank".
+   *
+   * La molteplicita' e' un'informazione di sicurezza e non va appiattita prima
+   * di arrivare qui: chi decide che cosa farne e' `authorizedRank`.
+   */
+  readonly ranks: readonly MemberRank[];
   /** Posizione del ruolo Discord piu' alto: serve per la gerarchia reale. */
   readonly highestRolePosition: number;
 }
@@ -87,8 +94,60 @@ export interface ActorContext {
 export interface TargetContext {
   readonly discordId: string;
   readonly isTtp: boolean;
-  readonly rank: MemberRank | undefined;
+  /** Tutti i rank posseduti dal bersaglio. Vedi `protectedRank`. */
+  readonly ranks: readonly MemberRank[];
   readonly highestRolePosition: number;
+}
+
+/**
+ * Il rank che vale AI FINI DEI PERMESSI per chi esegue l'operazione.
+ *
+ * Due condizioni, entrambe necessarie:
+ *
+ *  1. `isTtp`. Un rank e' una posizione DENTRO la gang: senza il ruolo TTP non
+ *     c'e' nessuna gang in cui avere una posizione. Chi si vede assegnare il
+ *     ruolo OG senza il ruolo TTP ha un ruolo colorato, non un grado.
+ *  2. `ranks.length === 1`. Con piu' rank lo stato non e' interpretabile in
+ *     modo univoco, e la risposta NON e' scegliere il piu' alto: sarebbe
+ *     un'escalation a costo zero, perche' basterebbe farsi assegnare un
+ *     secondo ruolo qualsiasi accanto a quello alto per ottenerne i privilegi.
+ *     Si nega e si segnala.
+ *
+ * `OWNER_ID` non passa di qui: il suo override viene applicato prima, in `can`.
+ *
+ * @returns il rank utilizzabile, oppure `undefined` — che significa "nessun
+ *          privilegio amministrativo", non "rank sconosciuto".
+ */
+export function authorizedRank(actor: ActorContext): MemberRank | undefined {
+  if (!actor.isTtp) return undefined;
+  if (actor.ranks.length !== 1) return undefined;
+  return actor.ranks[0];
+}
+
+/**
+ * Il rank da cui il BERSAGLIO e' protetto.
+ *
+ * Asimmetrico rispetto a `authorizedRank`, di proposito. Per l'attore
+ * l'ambiguita' toglie privilegi; per il bersaglio ne toglierebbe protezione — un
+ * membro con due rank diventerebbe amministrabile da chiunque gli stia sotto.
+ * Quindi qui si prende il piu' alto fra quelli posseduti: fra le due letture
+ * possibili si sceglie sempre quella che nega, mai quella che concede.
+ */
+export function protectedRank(target: TargetContext): MemberRank | undefined {
+  let highest: MemberRank | undefined;
+  for (const rank of target.ranks) {
+    if (highest === undefined || compareRanks(rank, highest) > 0) highest = rank;
+  }
+  return highest;
+}
+
+/**
+ * Lo stato dei ruoli dell'attore e' ambiguo: piu' rank insieme, oppure un rank
+ * senza il ruolo TTP. In entrambi i casi nessun privilegio viene dedotto, e la
+ * combinazione merita una segnalazione di consistenza.
+ */
+export function hasAmbiguousRankState(actor: ActorContext): boolean {
+  return actor.ranks.length > 1 || (actor.ranks.length > 0 && !actor.isTtp);
 }
 
 export type AuthorizationDecision =
@@ -152,12 +211,28 @@ export function can(
   operation: Operation,
   policy: PermissionPolicy = DEFAULT_POLICY,
 ): AuthorizationDecision {
-  // L'owner del bot ha sempre accesso completo.
+  // L'owner del bot ha sempre accesso completo: e' l'override che consente di
+  // intervenire anche quando la configurazione dei ruoli e' rotta.
   if (actor.isBotOwner) return ALLOW;
 
   if (READ_ONLY_OPERATIONS.has(operation)) return ALLOW;
 
-  switch (actor.rank) {
+  // Il rank NON si legge mai direttamente dall'attore: passa sempre da qui,
+  // che e' il punto in cui "TTP + esattamente un rank" viene fatto valere.
+  const rank = authorizedRank(actor);
+
+  // Distinguere il diniego per ambiguita' da quello per rank insufficiente non
+  // e' cosmesi: senza, chi ha due rank per sbaglio vede "non hai i permessi" e
+  // non ha modo di capire che il problema e' il secondo ruolo.
+  if (rank === undefined && hasAmbiguousRankState(actor)) {
+    return deny(
+      actor.isTtp
+        ? 'Hai piu di un rank contemporaneamente: nessun privilegio amministrativo viene dedotto. Lascia un solo ruolo rank e riprova.'
+        : 'Hai un ruolo rank ma non il ruolo TTP: senza membership il rank non concede nessun permesso.',
+    );
+  }
+
+  switch (rank) {
     case MemberRank.OG:
       return ALLOW;
 
@@ -213,7 +288,7 @@ export function can(
       return deny('Non hai i permessi necessari per questa operazione.');
 
     default: {
-      const exhaustive: never = actor.rank;
+      const exhaustive: never = rank;
       return deny(`Rank sconosciuto: ${String(exhaustive)}`);
     }
   }
@@ -253,20 +328,25 @@ export function canActOn(
 
   if (actor.isBotOwner) return ALLOW;
 
+  // Stesse due letture asimmetriche usate ovunque: il rank dell'attore vale
+  // solo se non ambiguo, quello del bersaglio e' il piu' alto che possiede.
+  const actorRank = authorizedRank(actor);
+  const targetRank = protectedRank(target);
+
   if (MUTATING_MEMBER_OPERATIONS.has(operation)) {
     if (actor.discordId === target.discordId) {
       return deny('Non puoi eseguire questa operazione su te stesso.');
     }
 
     // Big Homie non amministra OG, mai.
-    if (actor.rank === MemberRank.BIG_HOMIE && target.rank === MemberRank.OG) {
+    if (actorRank === MemberRank.BIG_HOMIE && targetRank === MemberRank.OG) {
       return deny('Un Big Homie non puo’ amministrare un OG.');
     }
 
     // Big Homie non amministra un altro Big Homie, salvo policy esplicita.
     if (
-      actor.rank === MemberRank.BIG_HOMIE &&
-      target.rank === MemberRank.BIG_HOMIE &&
+      actorRank === MemberRank.BIG_HOMIE &&
+      targetRank === MemberRank.BIG_HOMIE &&
       !policy.bigCanManageBig
     ) {
       return deny('Un Big Homie non puo’ amministrare un altro Big Homie con la policy attuale.');
@@ -274,9 +354,9 @@ export function canActOn(
 
     // Nessuno puo' amministrare un rank superiore al proprio.
     if (
-      actor.rank !== undefined &&
-      target.rank !== undefined &&
-      compareRanks(target.rank, actor.rank) > 0
+      actorRank !== undefined &&
+      targetRank !== undefined &&
+      compareRanks(targetRank, actorRank) > 0
     ) {
       return deny('Non puoi amministrare un membro di rank superiore al tuo.');
     }
@@ -305,9 +385,12 @@ export function canAssignRank(
   targetRank: MemberRank,
   policy: PermissionPolicy = DEFAULT_POLICY,
 ): AuthorizationDecision {
-  if (actor.isBotOwner || actor.rank === MemberRank.OG) return ALLOW;
+  if (actor.isBotOwner) return ALLOW;
 
-  if (actor.rank === MemberRank.BIG_HOMIE) {
+  const rank = authorizedRank(actor);
+  if (rank === MemberRank.OG) return ALLOW;
+
+  if (rank === MemberRank.BIG_HOMIE) {
     if (isLeadershipRank(targetRank) && !policy.bigCanPromoteToLeadership) {
       return deny(
         'Un Big Homie non puo’ assegnare il rank Big Homie o OG con la policy attuale: serve un OG.',

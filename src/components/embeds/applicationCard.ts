@@ -32,9 +32,7 @@ export function buildApplicationEmbed(
     );
 
   if (verification) {
-    const icName = [verification.rpName, verification.rpSurname]
-      .filter(Boolean)
-      .join(' ');
+    const icName = [verification.rpName, verification.rpSurname].filter(Boolean).join(' ');
 
     embed.addFields(
       {

@@ -222,18 +222,27 @@ export interface MemberHistoryRepository {
 // MemberSpecialRole
 // -----------------------------------------------------------------------------
 
+/**
+ * `actorDiscordId` e' NULLABILE su tutte le mutazioni.
+ *
+ * `null` significa "nessun operatore": e' il caso della sincronizzazione
+ * automatica dei ruoli assegnati a mano dalla UI di Discord, dove l'elenco dei
+ * membri della guild non dice CHI ha fatto la modifica. Inventare un attore
+ * sarebbe peggio che ammettere di non saperlo, e le colonne Prisma erano gia'
+ * nullable: qui si allinea soltanto il contratto.
+ */
 export interface MemberSpecialRoleRepository {
   listActive(memberId: string): Promise<MemberSpecialRole[]>;
   /** @returns `null` se il ruolo era gia' attivo (operazione idempotente). */
   add(
     memberId: string,
     role: SpecialRole,
-    actorDiscordId: string,
+    actorDiscordId: string | null,
   ): Promise<MemberSpecialRole | null>;
   /** @returns `false` se non c'era nessuna assegnazione attiva da rimuovere. */
-  remove(memberId: string, role: SpecialRole, actorDiscordId: string): Promise<boolean>;
+  remove(memberId: string, role: SpecialRole, actorDiscordId: string | null): Promise<boolean>;
   /** Rimuove tutte le assegnazioni attive. Usato all'uscita dalla gang. */
-  removeAll(memberId: string, actorDiscordId: string): Promise<SpecialRole[]>;
+  removeAll(memberId: string, actorDiscordId: string | null): Promise<SpecialRole[]>;
 }
 
 // -----------------------------------------------------------------------------

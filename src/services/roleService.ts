@@ -75,9 +75,15 @@ export interface RoleService {
   /** Revoca l'accesso community: Verified + Friend + Mafia. */
   revokeCommunityAccess(discordId: string, reason: string): Promise<GuildMemberSnapshot>;
 
-  /** Rank desumibile dai ruoli Discord posseduti. */
-  readRank(snapshot: GuildMemberSnapshot): MemberRank | undefined;
-  /** Tutti i rank posseduti: piu' di uno e' un'inconsistenza da segnalare. */
+  /**
+   * Tutti i rank posseduti, dal piu' basso al piu' alto.
+   *
+   * NON esiste una `readRank()` che restituisca "il rank": chiunque debba
+   * ridurre questa lista a un valore singolo deve dichiarare con quale regola
+   * lo fa, perche' la regola giusta dipende da chi chiede. Vedi
+   * `readDiscordRoleState` (esattamente uno, altrimenti nessuno) e
+   * `protectedRank` (il piu' alto, per proteggere un bersaglio).
+   */
   readAllRanks(snapshot: GuildMemberSnapshot): MemberRank[];
   readSpecialRoles(snapshot: GuildMemberSnapshot): SpecialRole[];
   isVerified(snapshot: GuildMemberSnapshot): boolean;
@@ -177,12 +183,6 @@ export function createRoleService(deps: {
         if (rank) found.push(rank);
       }
       return found;
-    },
-
-    readRank(snapshot) {
-      // Con piu' rank presenti (stato anomalo) prendiamo il piu' alto:
-      // `allRankIds` e' in ordine crescente, quindi e' l'ultimo trovato.
-      return service.readAllRanks(snapshot).at(-1);
     },
 
     readSpecialRoles(snapshot) {

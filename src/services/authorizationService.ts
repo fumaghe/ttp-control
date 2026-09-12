@@ -67,9 +67,13 @@ export function createAuthorizationService(deps: {
       isBotOwner: snapshot.discordId === ownerId,
       isGuildOwner: snapshot.isGuildOwner,
       isTtp: roles.isTtp(snapshot),
-      // Il rank si legge dai RUOLI DISCORD, non dal database: e' lo stato che
+      // I rank si leggono dai RUOLI DISCORD, non dal database: e' lo stato che
       // l'utente ha davvero in questo istante.
-      rank: roles.readRank(snapshot),
+      //
+      // Si passano TUTTI, senza ridurli qui: la riduzione a un rank singolo e'
+      // una decisione di sicurezza e vive nella permission matrix
+      // (`authorizedRank`), dove e' testabile e non aggirabile.
+      ranks: roles.readAllRanks(snapshot),
       highestRolePosition: snapshot.highestRolePosition,
     };
   }
@@ -87,7 +91,7 @@ export function createAuthorizationService(deps: {
           isBotOwner: discordId === ownerId,
           isGuildOwner: false,
           isTtp: false,
-          rank: undefined,
+          ranks: [],
           highestRolePosition: 0,
         };
       }
@@ -100,7 +104,7 @@ export function createAuthorizationService(deps: {
       return {
         discordId,
         isTtp: roles.isTtp(snapshot),
-        rank: roles.readRank(snapshot),
+        ranks: roles.readAllRanks(snapshot),
         highestRolePosition: snapshot.highestRolePosition,
       };
     },

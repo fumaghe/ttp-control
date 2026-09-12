@@ -5,7 +5,6 @@
  * usato da `/member add` e dall'approvazione delle candidature.
  */
 import { SlashCommandBuilder } from '@discordjs/builders';
-import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { MemberRank } from '../generated/prisma/enums.js';
 import { RANK_LABEL, RANK_ORDER } from '../config/constants.js';
 import {
@@ -29,7 +28,15 @@ export const communityCommand: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName('community')
     .setDescription('Gestione della community esterna alla gang')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    // NESSUN `setDefaultMemberPermissions`: l'autorizzazione di questo comando e'
+    // APPLICATIVA, non Discord.
+    //
+    // Un gate `ManageRoles`/`ManageGuild` qui sopra si frappone PRIMA della
+    // permission matrix e rende inutile assegnare OG o Big Homie: Discord
+    // rifiuterebbe l'interaction prima ancora che il bot la veda. Il comando
+    // resta quindi VISIBILE a tutti, ed e' l'handler a rifiutare server-side —
+    // cosa che fa a ogni singola interaction, bottoni e modal compresi, perche'
+    // chi ha aperto un pannello non dice nulla su chi ci sta cliccando adesso.
     .addSubcommand((sub) =>
       sub
         .setName('list')

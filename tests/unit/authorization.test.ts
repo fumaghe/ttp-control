@@ -8,34 +8,59 @@ import { describe, expect, it } from 'vitest';
 import { MemberRank } from '../../src/generated/prisma/enums.js';
 import {
   type ActorContext,
+  authorizedRank,
   canActOn,
   canAssignRank,
   can,
   DEFAULT_POLICY,
+  hasAmbiguousRankState,
   isLeadershipRank,
   type PermissionPolicy,
+  protectedRank,
   type TargetContext,
 } from '../../src/config/permissions.js';
 
-function actor(overrides: Partial<ActorContext> = {}): ActorContext {
+/**
+ * Scorciatoia dei test: `rank` descrive il caso normale "esattamente un rank".
+ *
+ * I contesti reali portano `ranks`, una LISTA, perché la molteplicità è
+ * un'informazione di sicurezza. Qui si traduce la scorciatoia nella lista, così
+ * i casi che vogliono davvero due rank (o zero) li passano espliciti.
+ */
+interface RankShorthand {
+  rank?: MemberRank | undefined;
+}
+
+function ranksFrom(
+  overrides: { rank?: MemberRank | undefined; ranks?: readonly MemberRank[] },
+  fallback: MemberRank,
+): readonly MemberRank[] {
+  if (overrides.ranks !== undefined) return overrides.ranks;
+  if ('rank' in overrides) return overrides.rank === undefined ? [] : [overrides.rank];
+  return [fallback];
+}
+
+function actor(overrides: Partial<ActorContext> & RankShorthand = {}): ActorContext {
+  const { rank: _rank, ...rest } = overrides;
   return {
     discordId: '1',
     isBotOwner: false,
     isGuildOwner: false,
     isTtp: true,
-    rank: MemberRank.BIG_HOMIE,
     highestRolePosition: 50,
-    ...overrides,
+    ...rest,
+    ranks: ranksFrom(overrides, MemberRank.BIG_HOMIE),
   };
 }
 
-function target(overrides: Partial<TargetContext> = {}): TargetContext {
+function target(overrides: Partial<TargetContext> & RankShorthand = {}): TargetContext {
+  const { rank: _rank, ...rest } = overrides;
   return {
     discordId: '2',
     isTtp: true,
-    rank: MemberRank.RESIDENT,
     highestRolePosition: 10,
-    ...overrides,
+    ...rest,
+    ranks: ranksFrom(overrides, MemberRank.RESIDENT),
   };
 }
 
@@ -353,5 +378,150 @@ describe('regole trasversali', () => {
       'member.promote',
     );
     expect(decision.allowed).toBe(true);
+  });
+});
+
+// =============================================================================
+// Il rank vale solo con TTP e solo se non ambiguo
+// =============================================================================
+
+describe('un rank senza TTP non concede permessi', () => {
+  // Un rank è una posizione DENTRO la gang. Senza il ruolo TTP non c'è nessuna
+  // gang in cui avere una posizione: chi si fa assegnare `OG` e basta ha un
+  // ruolo colorato, non un grado.
+
+  it('OG senza TTP non ha i permessi da OG', () => {
+    const og = actor({ isTtp: false, rank: MemberRank.OG });
+
+    expect(can(og, 'member.permadeath').allowed).toBe(false);
+    expect(can(og, 'setup.run').allowed).toBe(false);
+    expect(can(og, 'system.check').allowed).toBe(false);
+    expect(can(og, 'member.remove').allowed).toBe(false);
+    expect(can(og, 'blacklist.manage').allowed).toBe(false);
+  });
+
+  it('Big Homie senza TTP non ha i permessi di Leadership', () => {
+    const bigHomie = actor({ isTtp: false, rank: MemberRank.BIG_HOMIE });
+
+    expect(can(bigHomie, 'member.add').allowed).toBe(false);
+    expect(can(bigHomie, 'member.promote').allowed).toBe(false);
+    expect(can(bigHomie, 'panel.use').allowed).toBe(false);
+    expect(can(bigHomie, 'member.notes.view').allowed).toBe(false);
+  });
+
+  it('non può nemmeno assegnare rank', () => {
+    expect(
+      canAssignRank(actor({ isTtp: false, rank: MemberRank.OG }), MemberRank.RESIDENT).allowed,
+    ).toBe(false);
+  });
+
+  it('non può agire su un bersaglio', () => {
+    expect(
+      canActOn(actor({ isTtp: false, rank: MemberRank.OG }), target(), 'member.remove').allowed,
+    ).toBe(false);
+  });
+
+  it('conserva comunque la sola lettura, come ogni altro utente', () => {
+    const og = actor({ isTtp: false, rank: MemberRank.OG });
+    expect(can(og, 'roster.view').allowed).toBe(true);
+    expect(can(og, 'member.info').allowed).toBe(true);
+  });
+
+  it('spiega che manca TTP, invece di un generico "non hai i permessi"', () => {
+    const decision = can(actor({ isTtp: false, rank: MemberRank.OG }), 'member.remove');
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toContain('TTP');
+  });
+});
+
+describe('più rank contemporaneamente non concedono nulla', () => {
+  // La risposta all'ambiguità NON è scegliere il rank più alto: sarebbe
+  // un'escalation gratuita, perché basterebbe farsi assegnare un secondo ruolo
+  // qualunque accanto a quello alto per ottenerne i privilegi.
+
+  const ambiguous = actor({ ranks: [MemberRank.RESIDENT, MemberRank.OG] });
+
+  it('non concede i privilegi del rank più alto', () => {
+    expect(can(ambiguous, 'member.permadeath').allowed).toBe(false);
+    expect(can(ambiguous, 'setup.run').allowed).toBe(false);
+    expect(can(ambiguous, 'member.add').allowed).toBe(false);
+    expect(can(ambiguous, 'blacklist.manage').allowed).toBe(false);
+  });
+
+  it('non concede nemmeno quelli del rank più basso', () => {
+    expect(can(ambiguous, 'member.notes.view').allowed).toBe(false);
+  });
+
+  it('non permette di assegnare rank', () => {
+    expect(canAssignRank(ambiguous, MemberRank.RESIDENT).allowed).toBe(false);
+  });
+
+  it('è riconoscibile come stato da segnalare', () => {
+    expect(hasAmbiguousRankState(ambiguous)).toBe(true);
+    expect(hasAmbiguousRankState(actor({ isTtp: false, rank: MemberRank.OG }))).toBe(true);
+    expect(hasAmbiguousRankState(actor({ rank: MemberRank.OG }))).toBe(false);
+    expect(hasAmbiguousRankState(actor({ isTtp: false, rank: undefined }))).toBe(false);
+  });
+
+  it('spiega che il problema sono i due rank', () => {
+    const decision = can(ambiguous, 'member.remove');
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toContain('rank');
+  });
+});
+
+describe('TTP con esattamente un rank', () => {
+  it('un OG con TTP ha i permessi da OG', () => {
+    const og = actor({ isTtp: true, rank: MemberRank.OG });
+    expect(can(og, 'member.permadeath').allowed).toBe(true);
+    expect(can(og, 'setup.run').allowed).toBe(true);
+    expect(canAssignRank(og, MemberRank.BIG_HOMIE).allowed).toBe(true);
+  });
+
+  it('`authorizedRank` restituisce quel rank e nessun altro', () => {
+    expect(authorizedRank(actor({ isTtp: true, rank: MemberRank.OG }))).toBe(MemberRank.OG);
+    expect(authorizedRank(actor({ isTtp: false, rank: MemberRank.OG }))).toBeUndefined();
+    expect(authorizedRank(actor({ ranks: [MemberRank.OG, MemberRank.BIG] }))).toBeUndefined();
+    expect(authorizedRank(actor({ ranks: [] }))).toBeUndefined();
+  });
+});
+
+describe('l’owner del bot mantiene l’override completo', () => {
+  it('senza TTP e senza nessun rank', () => {
+    const owner = actor({ isBotOwner: true, isTtp: false, ranks: [] });
+
+    expect(can(owner, 'member.permadeath').allowed).toBe(true);
+    expect(can(owner, 'setup.run').allowed).toBe(true);
+    expect(canAssignRank(owner, MemberRank.OG).allowed).toBe(true);
+  });
+
+  it('anche con due rank contemporaneamente', () => {
+    // L'override esiste proprio per poter intervenire quando la
+    // configurazione dei ruoli è rotta: se l'ambiguità lo bloccasse, non
+    // servirebbe a niente nel solo caso in cui serve.
+    const owner = actor({ isBotOwner: true, ranks: [MemberRank.RESIDENT, MemberRank.OG] });
+    expect(can(owner, 'setup.run').allowed).toBe(true);
+    expect(canActOn(owner, target({ rank: MemberRank.OG }), 'member.remove').allowed).toBe(true);
+  });
+});
+
+describe('protezione del bersaglio: l’asimmetria è voluta', () => {
+  it('un bersaglio con due rank è protetto dal più alto', () => {
+    // Per l'attore l'ambiguità toglie privilegi; per il bersaglio non deve
+    // togliere protezione, altrimenti farsi assegnare un rank basso in più
+    // renderebbe un OG amministrabile da chiunque.
+    const ambiguousTarget = target({
+      ranks: [MemberRank.RESIDENT, MemberRank.OG],
+      highestRolePosition: 10,
+    });
+
+    expect(protectedRank(ambiguousTarget)).toBe(MemberRank.OG);
+    expect(
+      canActOn(actor({ rank: MemberRank.BIG_HOMIE }), ambiguousTarget, 'member.remove').allowed,
+    ).toBe(false);
+  });
+
+  it('un bersaglio senza rank non è protetto dalla regola di gerarchia', () => {
+    expect(protectedRank(target({ ranks: [] }))).toBeUndefined();
   });
 });

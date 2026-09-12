@@ -12,6 +12,7 @@ import { createAuthorizationService } from '../../src/services/authorizationServ
 import { createBlacklistService } from '../../src/services/blacklistService.js';
 import { createCommunityService } from '../../src/services/communityService.js';
 import { createConsistencyService } from '../../src/services/consistencyService.js';
+import { createDiscordRoleImportService } from '../../src/services/discordRoleImportService.js';
 import { createMemberService } from '../../src/services/memberService.js';
 import {
   createRankAnnouncementService,
@@ -81,6 +82,9 @@ export function testEnv(): Env {
   return {
     nodeEnv: 'test',
     logLevel: 'error',
+    // I test che vogliono l'import lo costruiscono esplicitamente: il default
+    // del harness resta il comportamento storico.
+    roleSyncMode: 'REPORT_ONLY',
     discordToken: 'test.token.value',
     // Chiave Ed25519 fittizia: 64 caratteri esadecimali, la forma che la
     // validazione dell'environment pretende.
@@ -259,6 +263,7 @@ export interface Harness {
   blacklist: ReturnType<typeof createBlacklistService>;
   community: ReturnType<typeof createCommunityService>;
   consistency: ReturnType<typeof createConsistencyService>;
+  roleImport: ReturnType<typeof createDiscordRoleImportService>;
 }
 
 export function createHarness(): Harness {
@@ -330,10 +335,17 @@ export function createHarness(): Harness {
         .map(snapshotOf),
   });
 
+  const roleImport = createDiscordRoleImportService({
+    repos,
+    roleRegistry: roles,
+    audit,
+    announcements,
+  });
+
   const consistency = createConsistencyService({
     repos,
-    roles: roleService,
     roleRegistry: roles,
+    roleImport,
     listAllGuildMembers: async () =>
       [...guild.members.values()].filter((m) => m.present).map(snapshotOf),
   });
@@ -355,6 +367,7 @@ export function createHarness(): Harness {
     blacklist,
     community,
     consistency,
+    roleImport,
   };
 }
 

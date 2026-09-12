@@ -29,6 +29,30 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
+/**
+ * Che cosa fa il cron quando trova un ruolo modificato a mano dalla UI di
+ * Discord.
+ *
+ * Volutamente un ENUM e non un booleano tipo `AUTO_SYNC=true`: "sincronizza"
+ * non e' una domanda si'/no. Il nome del valore dice esattamente fin dove
+ * arriva il bot, e aggiungere un terzo comportamento in futuro non costringe a
+ * reinterpretare una variabile gia' in produzione.
+ *
+ *  - `REPORT_ONLY`  rileva e segnala con un ROLE_SYNC_WARNING, non scrive nulla
+ *                   sul database. E' il comportamento storico del bot.
+ *  - `IMPORT_SAFE`  importa automaticamente le sole transizioni COSTRUTTIVE e
+ *                   non ambigue (Verified, ingresso TTP + rank, cambio rank,
+ *                   Inactive, badge e specializzazioni). Tutto cio' che toglie
+ *                   qualcosa a qualcuno — rimozione di TTP, azzeramento dei
+ *                   rank, permadeath, blacklist — resta comando-only e produce
+ *                   soltanto un warning.
+ *
+ * Il default e' `REPORT_ONLY`: chi non configura nulla non deve ritrovarsi un
+ * bot che scrive sul database da solo. Il rollback e' rimettere questo valore.
+ */
+const ROLE_SYNC_MODES = ['REPORT_ONLY', 'IMPORT_SAFE'] as const;
+export type RoleSyncMode = (typeof ROLE_SYNC_MODES)[number];
+
 class EnvironmentError extends Error {
   public constructor(problems: string[]) {
     super(
@@ -166,6 +190,16 @@ function build(source: EnvSource) {
   const parsed = {
     nodeEnv: read.enum('NODE_ENV', NODE_ENVS, 'development'),
     logLevel: read.enum('LOG_LEVEL', LOG_LEVELS, 'info'),
+
+    /**
+     * Comportamento del cron davanti a un ruolo assegnato a mano.
+     *
+     * Validazione rigorosa: un valore non riconosciuto NON ricade
+     * silenziosamente sul default, fa fallire lo startup. Un refuso come
+     * `IMPORT-SAFE` deve essere visibile subito, non trasformarsi in un bot che
+     * si limita a segnalare mentre l'operatore crede che stia importando.
+     */
+    roleSyncMode: read.enum('ROLE_SYNC_MODE', ROLE_SYNC_MODES, 'REPORT_ONLY'),
 
     discordToken: read.discordToken('DISCORD_TOKEN'),
     /** Verifica della firma delle interaction HTTP. NON e' il bot token. */

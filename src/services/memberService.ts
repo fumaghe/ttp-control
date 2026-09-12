@@ -41,6 +41,7 @@ import { createLogger } from '../utils/logger.js';
 import type { RoleRegistry } from '../config/roles.js';
 import type { AuditService } from './auditService.js';
 import type { RankAnnouncementService } from './rankAnnouncementService.js';
+import { readDiscordRoleState } from './discordRoleState.js';
 import type { RoleService } from './roleService.js';
 import type { GuildMemberSnapshot, RoleGateway } from './roleGateway.js';
 
@@ -403,7 +404,10 @@ export function createMemberService(deps: {
         const existing = await repos.members.findByDiscordId(input.discordId);
         if (existing !== null && statusIsInGang(existing.status)) {
           // Gia' membro: riallineiamo i ruoli Discord e ci fermiamo.
-          if (!roles.isTtp(snapshot) || roles.readRank(snapshot) !== existing.rank) {
+          // `rank` resta `undefined` con zero o piu' rank: entrambi i casi
+          // sono anomali e vanno riallineati, non interpretati.
+          const discordRank = readDiscordRoleState(snapshot, roleRegistry).rank;
+          if (!roles.isTtp(snapshot) || discordRank !== existing.rank) {
             await roles.assignTtpWithRank(
               input.discordId,
               existing.rank,

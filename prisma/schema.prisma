@@ -130,6 +130,9 @@ enum AuditAction {
   KICKED
   BANNED
   ROLE_SYNC_WARNING
+  /// Report aggregato dell'adozione iniziale dei ruoli Discord gia' assegnati
+  /// prima del deploy (primo cron con ROLE_SYNC_MODE=IMPORT_SAFE).
+  ROLE_SYNC_BOOTSTRAP
   MEMBER_JOINED_DISCORD
   MEMBER_LEFT_DISCORD
   BLACKLISTED_USER_REJOINED

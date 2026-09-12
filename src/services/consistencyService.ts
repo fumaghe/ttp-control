@@ -1,15 +1,34 @@
 /**
  * Data consistency: confronta lo stato Discord con lo stato a database.
  *
- * SOLO REPORT. Nessuna correzione automatica: una "riparazione" sbagliata su
- * dati di membership fa piu' danni dell'incoerenza che vorrebbe risolvere.
- * L'output serve a un operatore per decidere.
+ * SOLO REPORT. `/system sync-check` non corregge mai nulla, nemmeno con
+ * `ROLE_SYNC_MODE=IMPORT_SAFE`: chiamare una diagnostica non deve avere effetti
+ * collaterali, e chi la esegue per capire cosa sta succedendo non si aspetta di
+ * cambiare lo stato guardandolo.
+ *
+ * NESSUNA SECONDA IMPLEMENTAZIONE DELLE REGOLE. Le invarianti stanno tutte in
+ * `discordRoleState`, e questo service chiede lo STESSO piano che il cron
+ * applicherebbe. Da qui viene la proprietà che conta di più: dopo un cron
+ * riuscito in `IMPORT_SAFE`, ciò che è stato importato smette di comparire qui,
+ * perché il piano che lo descriveva adesso è vuoto. Con due implementazioni
+ * separate non ci sarebbe modo di garantirlo.
+ *
+ * Ogni voce dice anche se il prossimo cron la sistemerà da sé (`importable`) o
+ * se serve una persona: è la differenza fra "aspetta cinque minuti" e "qualcuno
+ * deve decidere", e un report che non la fa costringe a indovinare.
  */
 import { MemberStatus, TtpApplicationStatus } from '../generated/prisma/enums.js';
 import { RANK_LABEL } from '../config/constants.js';
+import type { RoleSyncMode } from '../config/env.js';
 import type { RoleRegistry } from '../config/roles.js';
 import type { Repositories } from '../repositories/types.js';
-import type { RoleService } from './roleService.js';
+import type { DiscordRoleImportService } from './discordRoleImportService.js';
+import {
+  describeRoleImportAction,
+  type RoleImportAction,
+  type RoleStateIssueCode,
+  suggestionForAction,
+} from './discordRoleState.js';
 import type { GuildMemberSnapshot } from './roleGateway.js';
 
 /** Categorie di incoerenza rilevate. */
@@ -22,7 +41,10 @@ export type InconsistencyKind =
   | 'TTP_ROLE_WITHOUT_MEMBER_DB'
   | 'RANK_MISMATCH'
   | 'INACTIVE_MISMATCH'
+  | 'INACTIVE_WITHOUT_MEMBERSHIP'
   | 'SPECIAL_ROLE_MISMATCH'
+  | 'SPECIAL_ROLE_WITHOUT_MEMBERSHIP'
+  | 'PERMADEATH_CONFLICT'
   | 'VERIFIED_DB_WITHOUT_ROLE'
   | 'VERIFIED_ROLE_WITHOUT_DB'
   | 'APPROVED_APPLICATION_WITHOUT_MEMBER'
@@ -38,6 +60,14 @@ export interface Inconsistency {
   readonly detail: string;
   /** Cosa dovrebbe fare l'operatore. Mai eseguito automaticamente. */
   readonly suggestion: string;
+  /**
+   * Il prossimo cron può sistemarla da solo, se `ROLE_SYNC_MODE=IMPORT_SAFE`.
+   *
+   * `false` non vuol dire "grave": vuol dire che la decisione richiede un
+   * contesto che i ruoli Discord non contengono — una motivazione, un autore,
+   * la volontà di far uscire davvero qualcuno dalla gang.
+   */
+  readonly importable: boolean;
 }
 
 export interface ConsistencyReport {
@@ -45,6 +75,10 @@ export interface ConsistencyReport {
   readonly checkedGuildMembers: number;
   readonly validMembers: number;
   readonly issues: readonly Inconsistency[];
+  /** Modalità configurata: decide se le voci `importable` verranno risolte. */
+  readonly mode: RoleSyncMode;
+  /** Quante voci il prossimo cron sistemerebbe da sé in `IMPORT_SAFE`. */
+  readonly importableIssues: number;
   readonly generatedAt: Date;
 }
 
@@ -61,33 +95,95 @@ const SEVERITY: Record<InconsistencyKind, Severity> = {
   TTP_ROLE_WITHOUT_MEMBER_DB: 'error',
   RANK_MISMATCH: 'error',
   INACTIVE_MISMATCH: 'warning',
+  INACTIVE_WITHOUT_MEMBERSHIP: 'warning',
   SPECIAL_ROLE_MISMATCH: 'warning',
+  SPECIAL_ROLE_WITHOUT_MEMBERSHIP: 'warning',
+  PERMADEATH_CONFLICT: 'error',
   VERIFIED_DB_WITHOUT_ROLE: 'warning',
   VERIFIED_ROLE_WITHOUT_DB: 'warning',
   APPROVED_APPLICATION_WITHOUT_MEMBER: 'error',
   BLACKLISTED_WITH_ACCESS: 'error',
 };
 
+/**
+ * Violazione di invariante → categoria del report.
+ *
+ * Due codici conservano di proposito il nome storico invece del proprio:
+ * `TTP_REMOVED_FROM_MEMBER` è esattamente la condizione che il report chiamava
+ * `MEMBER_DB_WITHOUT_TTP_ROLE`, e `VERIFIED_REMOVED` quella che chiamava
+ * `VERIFIED_DB_WITHOUT_ROLE`. Rinominarle avrebbe cambiato un'etichetta che
+ * l'operatore riconosce, senza cambiare nulla di ciò che descrive.
+ */
+const ISSUE_KIND: Record<RoleStateIssueCode, InconsistencyKind> = {
+  TTP_WITHOUT_VERIFIED: 'TTP_WITHOUT_VERIFIED',
+  TTP_WITHOUT_RANK: 'TTP_WITHOUT_RANK',
+  MULTIPLE_RANKS: 'MULTIPLE_RANKS',
+  RANK_WITHOUT_TTP: 'RANK_WITHOUT_TTP',
+  INACTIVE_WITHOUT_MEMBERSHIP: 'INACTIVE_WITHOUT_MEMBERSHIP',
+  SPECIAL_ROLE_WITHOUT_MEMBERSHIP: 'SPECIAL_ROLE_WITHOUT_MEMBERSHIP',
+  BLACKLISTED_WITH_ACCESS: 'BLACKLISTED_WITH_ACCESS',
+  PERMADEATH_WITH_MEMBERSHIP_ROLES: 'PERMADEATH_CONFLICT',
+  PERMADEATH_MEMBER_REASSIGNED: 'PERMADEATH_CONFLICT',
+  TTP_REMOVED_FROM_MEMBER: 'MEMBER_DB_WITHOUT_TTP_ROLE',
+  VERIFIED_REMOVED: 'VERIFIED_DB_WITHOUT_ROLE',
+};
+
+/** Transizione importabile → categoria del report. */
+function actionKind(action: RoleImportAction): InconsistencyKind {
+  switch (action.kind) {
+    case 'import-verification':
+      return 'VERIFIED_ROLE_WITHOUT_DB';
+    case 'create-member':
+    case 'reactivate-member':
+      return 'TTP_ROLE_WITHOUT_MEMBER_DB';
+    case 'set-rank':
+      return 'RANK_MISMATCH';
+    case 'set-status':
+      return 'INACTIVE_MISMATCH';
+    case 'add-special-role':
+    case 'remove-special-role':
+      return 'SPECIAL_ROLE_MISMATCH';
+    default: {
+      const exhaustive: never = action;
+      throw new Error(`Azione di import sconosciuta: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
 export function createConsistencyService(deps: {
   repos: Repositories;
-  roles: RoleService;
   roleRegistry: RoleRegistry;
+  /** Sorgente unica delle regole: le stesse che il cron applicherebbe. */
+  roleImport: DiscordRoleImportService;
+  /** Modalità configurata. Non cambia cosa si rileva, solo cosa si consiglia. */
+  mode?: RoleSyncMode | undefined;
   /** Tutti i membri della guild, con i ruoli gia' risolti. */
   listAllGuildMembers: () => Promise<GuildMemberSnapshot[]>;
 }): ConsistencyService {
-  const { repos, roles, roleRegistry } = deps;
+  const { repos, roleImport } = deps;
+  const mode: RoleSyncMode = deps.mode ?? 'REPORT_ONLY';
 
   return {
     async run(): Promise<ConsistencyReport> {
       const issues: Inconsistency[] = [];
+
       const add = (
         kind: InconsistencyKind,
         discordId: string,
         displayName: string,
         detail: string,
         suggestion: string,
+        importable: boolean,
       ): void => {
-        issues.push({ kind, severity: SEVERITY[kind], discordId, displayName, detail, suggestion });
+        issues.push({
+          kind,
+          severity: SEVERITY[kind],
+          discordId,
+          displayName,
+          detail,
+          suggestion,
+          importable,
+        });
       };
 
       const [snapshots, dbMembers] = await Promise.all([
@@ -107,182 +203,69 @@ export function createConsistencyService(deps: {
       let validMembers = 0;
 
       // ------------------------------------------------------------------
-      // 1. Dal lato Discord: cosa dicono i ruoli.
+      // 1. Dal lato Discord: si chiede al motore di import cosa farebbe.
       // ------------------------------------------------------------------
       for (const snapshot of snapshots) {
         const { discordId, displayName } = snapshot;
-        const isTtp = roles.isTtp(snapshot);
-        const isVerified = roles.isVerified(snapshot);
-        const ranks = roles.readAllRanks(snapshot);
-        const member = memberById.get(discordId);
-        const inGang = inGangIds.has(discordId);
+        const plan = await roleImport.planFor(snapshot);
         let clean = true;
 
-        // TTP ⇒ Verified
-        if (isTtp && !isVerified) {
-          clean = false;
-          add(
-            'TTP_WITHOUT_VERIFIED',
-            discordId,
-            displayName,
-            'Ha il ruolo TTP ma non Verified.',
-            'Assegna Verified con `/community verified`: `TTP ⇒ Verified` è un’invariante.',
-          );
-        }
+        switch (plan.kind) {
+          case 'unchanged':
+            break;
 
-        // Esattamente un rank
-        if (isTtp && ranks.length === 0) {
-          clean = false;
-          add(
-            'TTP_WITHOUT_RANK',
-            discordId,
-            displayName,
-            'Ha il ruolo TTP ma nessun rank della gerarchia.',
-            'Assegna un rank con `/member rank`.',
-          );
-        }
-        if (ranks.length > 1) {
-          clean = false;
-          add(
-            'MULTIPLE_RANKS',
-            discordId,
-            displayName,
-            `Ha ${ranks.length} rank contemporaneamente: ${ranks.map((r) => RANK_LABEL[r]).join(' + ')}.`,
-            'Usa `/member rank` per riportarlo a un rank unico.',
-          );
-        }
-        if (!isTtp && ranks.length > 0) {
-          clean = false;
-          add(
-            'RANK_WITHOUT_TTP',
-            discordId,
-            displayName,
-            `Ha un rank (${ranks.map((r) => RANK_LABEL[r]).join(', ')}) senza il ruolo TTP.`,
-            'Rimuovi il rank a mano oppure regolarizza la membership con `/member add`.',
-          );
-        }
-
-        // Discord ↔ database
-        if (isTtp && !inGang) {
-          clean = false;
-          add(
-            'TTP_ROLE_WITHOUT_MEMBER_DB',
-            discordId,
-            displayName,
-            member
-              ? `Ha il ruolo TTP ma a database risulta **${member.status}**.`
-              : 'Ha il ruolo TTP ma non esiste nessun record Member.',
-            'Regolarizza con `/member add`, oppure rimuovi il ruolo se non è più un membro.',
-          );
-        }
-        if (!isTtp && inGang) {
-          clean = false;
-          add(
-            'MEMBER_DB_WITHOUT_TTP_ROLE',
-            discordId,
-            displayName,
-            'Risulta membro a database ma non ha il ruolo TTP su Discord.',
-            'Riassegna i ruoli con `/member add`, oppure registra l’uscita con `/member remove`.',
-          );
-        }
-
-        const soleRank = ranks.length === 1 ? ranks[0] : undefined;
-        if (member && inGang && soleRank !== undefined && soleRank !== member.rank) {
-          clean = false;
-          add(
-            'RANK_MISMATCH',
-            discordId,
-            displayName,
-            `Discord dice ${RANK_LABEL[soleRank]}, il database dice ${RANK_LABEL[member.rank]}.`,
-            'Allinea con `/member rank`.',
-          );
-        }
-
-        // Inactive
-        const hasInactiveRole = snapshot.roleIds.has(roleRegistry.inactive);
-        if (member && inGang) {
-          const shouldBeInactive = member.status === MemberStatus.INACTIVE;
-          if (shouldBeInactive !== hasInactiveRole) {
+          case 'blocked': {
             clean = false;
-            add(
-              'INACTIVE_MISMATCH',
-              discordId,
-              displayName,
-              shouldBeInactive
-                ? 'È INACTIVE a database ma non ha il ruolo Inactive su Discord.'
-                : 'Ha il ruolo Inactive su Discord ma a database è ACTIVE.',
-              'Allinea con `/member inactive` oppure `/member active`.',
-            );
+            const kind = ISSUE_KIND[plan.issue.code];
+            // Bloccato da un fatto autorevole a database: nessun cron lo
+            // risolverà, per quanto si aspetti.
+            add(kind, discordId, displayName, plan.issue.detail, plan.issue.suggestion, false);
+            break;
+          }
+
+          case 'warning':
+            clean = false;
+            for (const issue of plan.issues) {
+              add(
+                ISSUE_KIND[issue.code],
+                discordId,
+                displayName,
+                issue.detail,
+                issue.suggestion,
+                false,
+              );
+            }
+            break;
+
+          case 'actions':
+            clean = false;
+            for (const action of plan.actions) {
+              add(
+                actionKind(action),
+                discordId,
+                displayName,
+                describeRoleImportAction(action),
+                mode === 'IMPORT_SAFE'
+                  ? 'Nessun intervento necessario: il prossimo cron la importa da solo.'
+                  : suggestionForAction(action),
+                true,
+              );
+            }
+            break;
+
+          default: {
+            const exhaustive: never = plan;
+            throw new Error(`Piano di import sconosciuto: ${JSON.stringify(exhaustive)}`);
           }
         }
 
-        // Ruoli speciali
-        if (member) {
-          const discordSpecials = new Set(roles.readSpecialRoles(snapshot));
-          const dbSpecials = new Set(
-            (await repos.specialRoles.listActive(member.id)).map((entry) => entry.role),
-          );
-          const onlyDiscord = [...discordSpecials].filter((r) => !dbSpecials.has(r));
-          const onlyDb = [...dbSpecials].filter((r) => !discordSpecials.has(r));
-          if (onlyDiscord.length > 0 || onlyDb.length > 0) {
-            clean = false;
-            add(
-              'SPECIAL_ROLE_MISMATCH',
-              discordId,
-              displayName,
-              [
-                onlyDiscord.length > 0 ? `Solo su Discord: ${onlyDiscord.join(', ')}` : '',
-                onlyDb.length > 0 ? `Solo a database: ${onlyDb.join(', ')}` : '',
-              ]
-                .filter(Boolean)
-                .join(' · '),
-              'Allinea con `/member roles`.',
-            );
-          }
-        }
-
-        // Verified ↔ database
-        const verification = await repos.verifications.findActive(discordId);
-        if (isVerified && !verification) {
-          clean = false;
-          add(
-            'VERIFIED_ROLE_WITHOUT_DB',
-            discordId,
-            displayName,
-            'Ha il ruolo Verified ma non esiste una verifica attiva a database.',
-            'Fagli rifare la verifica, oppure registrala con `/community verified`.',
-          );
-        }
-        if (!isVerified && verification) {
-          clean = false;
-          add(
-            'VERIFIED_DB_WITHOUT_ROLE',
-            discordId,
-            displayName,
-            'Ha una verifica attiva a database ma non il ruolo Verified.',
-            'Riassegna il ruolo con `/community verified`.',
-          );
-        }
-
-        // Blacklist con accesso ancora attivo
-        if (await repos.blacklist.isBlacklisted(discordId)) {
-          if (isVerified || isTtp) {
-            clean = false;
-            add(
-              'BLACKLISTED_WITH_ACCESS',
-              discordId,
-              displayName,
-              'È in blacklist ma conserva Verified e/o TTP.',
-              'Revoca l’accesso con `/community revoke`.',
-            );
-          }
-        }
-
-        if (clean && inGang) validMembers += 1;
+        if (clean && inGangIds.has(discordId)) validMembers += 1;
       }
 
       // ------------------------------------------------------------------
       // 2. Dal lato database: membri che non sono piu' nella guild.
+      //    Non e' una divergenza di ruoli — non ci sono piu' ruoli da leggere —
+      //    quindi il motore di import non la vede e va cercata da questa parte.
       // ------------------------------------------------------------------
       for (const member of dbMembers) {
         if (member.status !== MemberStatus.ACTIVE && member.status !== MemberStatus.INACTIVE) {
@@ -294,8 +277,10 @@ export function createConsistencyService(deps: {
           'MEMBER_DB_WITHOUT_TTP_ROLE',
           member.discordId,
           `<@${member.discordId}>`,
-          'Risulta membro attivo a database ma non è più nel server Discord.',
+          `Risulta membro attivo (${RANK_LABEL[member.rank]}) a database ma non è più nel server Discord.`,
           'Registra l’uscita con `/member remove` se ha davvero lasciato la gang.',
+          // Uscire dal Discord NON è lasciare la gang: nessun automatismo.
+          false,
         );
       }
 
@@ -325,6 +310,7 @@ export function createConsistencyService(deps: {
             snapshot.displayName,
             'Ha una candidatura APPROVED ma non esiste nessun record Member.',
             'Completa l’ingresso con `/member add`.',
+            false,
           );
         }
       }
@@ -334,6 +320,8 @@ export function createConsistencyService(deps: {
         checkedGuildMembers: snapshots.length,
         validMembers,
         issues,
+        mode,
+        importableIssues: issues.filter((issue) => issue.importable).length,
         generatedAt: new Date(),
       };
     },

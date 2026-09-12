@@ -222,6 +222,17 @@ Il codice legge la configurazione esclusivamente tramite `src/config/env.ts`:
 **non esistono snowflake hardcoded nei service**, e i ruoli non vengono mai
 cercati per nome.
 
+### `ROLE_SYNC_MODE`
+
+| Valore | Comportamento |
+| --- | --- |
+| `REPORT_ONLY` (default) | rileva e segnala, non scrive sul database |
+| `IMPORT_SAFE` | importa le transizioni costruttive e non ambigue |
+
+Vive in `vars` dentro `wrangler.jsonc` (non è un secret) e in `.env` per gli
+script Node. Un valore non riconosciuto fa fallire lo startup invece di ricadere
+sul default. Vedi **Sincronizzazione Discord → database**.
+
 ### `DISCORD_PUBLIC_KEY` — non è il bot token
 
 È la variabile nuova della V2, e l'errore più facile da fare è confonderla con
@@ -339,6 +350,12 @@ npm run prisma:studio             # GUI sul database
 ```
 
 Le migration sono versionate in `prisma/migrations/` e vanno committate.
+
+> **`20260818120000_role_sync_bootstrap_audit`** aggiunge un solo valore
+> all'enum `AuditAction` (`ROLE_SYNC_BOOTSTRAP`, il report aggregato
+> dell'adozione iniziale dei ruoli). È non distruttiva — aggiunge, non rinomina
+> e non rimuove — e va applicata **prima** di distribuire il Worker con
+> `ROLE_SYNC_MODE=IMPORT_SAFE`.
 
 ---
 
@@ -671,10 +688,52 @@ matrice applicativa (`src/config/permissions.ts`, Phase 2+).
 
 Regole non negoziabili:
 
+- Un rank vale ai fini dei permessi **solo** se `isTtp === true` **e** il
+  membro ha **esattamente un rank**. Vedi sotto.
 - Big Homie **non** può amministrare OG.
 - Di default Big Homie **non** può amministrare un altro Big Homie.
 - `OWNER_ID` ha sempre accesso amministrativo completo.
 - Oltre alla matrice si controlla sempre la gerarchia Discord reale.
+
+#### Un rank conta solo con TTP, e solo se è uno solo
+
+Per tutti tranne `OWNER_ID`:
+
+```
+rank utilizzabile  ⟺  isTtp === true  AND  ranks.length === 1
+```
+
+**Senza `TTP` non esiste un rank valido.** Un rank è una posizione *dentro* la
+gang: senza il ruolo `TTP` non c'è nessuna gang in cui avere una posizione. Chi
+si vede assegnare `OG` e basta ha un ruolo colorato, non un grado.
+
+**Con più rank non si sceglie il più alto.** Sarebbe un'escalation a costo
+zero: basterebbe farsi assegnare un secondo ruolo qualsiasi accanto a quello
+alto per ottenerne i privilegi. Si nega, si segnala l'inconsistenza, e non si
+concede niente — nemmeno i privilegi del rank più *basso*.
+
+L'asimmetria con il **bersaglio** è voluta. Per l'attore l'ambiguità toglie
+privilegi; per il bersaglio ne toglierebbe *protezione* — un membro con due
+rank diventerebbe amministrabile da chiunque gli stia sotto. Quindi un bersaglio
+con più rank è protetto dal **più alto** che possiede: fra le due letture
+possibili si sceglie sempre quella che nega, mai quella che concede.
+
+`OWNER_ID` mantiene l'override completo anche senza `TTP` e anche con più rank:
+è proprio l'override che permette di intervenire quando la configurazione dei
+ruoli è rotta, e bloccarlo lì lo renderebbe inutile nel solo caso in cui serve.
+
+#### Nessun gate Discord davanti alla matrice
+
+Gli slash command **non** dichiarano `setDefaultMemberPermissions`. Un gate
+`ManageRoles`/`ManageGuild` si frappone *prima* della permission matrix: con
+quel gate attivo, assegnare `OG` o `Big Homie` non basterebbe — Discord
+rifiuterebbe l'interaction prima ancora che il bot la veda.
+
+Conseguenza: i comandi amministrativi sono **visibili a tutti**, e l'esecuzione
+è rifiutata **server-side** a ogni singola interaction — slash command, bottoni,
+modal e select menu compresi. Che un pannello sia stato creato da un OG non dice
+nulla su chi ci sta cliccando adesso, quindi l'autorizzazione viene rivalutata
+ogni volta.
 
 > **Il rank `Big` non è Leadership.**
 > Con la gerarchia a cinque rank il rank amministrativo si chiamava `Big`;
@@ -747,21 +806,216 @@ calcolare un diff.
 - chi esce dal Discord **non** viene rimosso dalla gang: si emette
   `MEMBER_LEFT_DISCORD`, più un `ROLE_SYNC_WARNING` se era un membro TTP, e la
   decisione resta alla Leadership;
-- una modifica manuale dei ruoli produce un `ROLE_SYNC_WARNING` con
-  `autoCorrected: false`. **Nessuna correzione automatica**, mai.
+- una modifica manuale dei ruoli viene **importata** se è costruttiva e non
+  ambigua, e altrimenti **segnalata** con un `ROLE_SYNC_WARNING`. Cosa ricada
+  in quale caso lo decide `ROLE_SYNC_MODE`: vedi la sezione qui sotto.
 
 Tre proprietà che rendono il cron sicuro da ripetere:
 
 1. **Seed silenzioso.** Alla prima esecuzione su una guild senza snapshot lo
    stato viene fotografato *senza* emettere eventi di join — altrimenti il
    primo cron inonderebbe l'audit con un `MEMBER_JOINED_DISCORD` per ogni
-   membro già presente.
+   membro già presente. In `IMPORT_SAFE` i ruoli già assegnati vengono comunque
+   adottati, ma in silenzio.
 2. **Isolamento degli errori.** Ogni membro è indipendente: se il suo
    trattamento fallisce, il suo snapshot **non** viene aggiornato e la
    prossima esecuzione riprova. Uno stato avanzato per qualcosa che non è
    successo sarebbe una corruzione silenziosa.
 3. **Idempotenza.** Una seconda esecuzione senza cambiamenti non produce
    nessun evento.
+
+---
+
+## Sincronizzazione Discord → database (`ROLE_SYNC_MODE`)
+
+Si possono assegnare ruoli a mano dalla UI di Discord — `Verified`, `TTP`, un
+rank, `Inactive`, badge e specializzazioni — e il gestionale se ne accorge da
+solo, senza `/member add`, `/member rank` o `/member roles`.
+
+### Principio di autorità
+
+**Discord è autorevole** su: presenza di `Verified`, membership `TTP`, rank
+gerarchico, `Inactive`, badge e specializzazioni, `Friend` e `Mafia`.
+
+**Il database resta autorevole** su: blacklist, candidature, dati IC/OOC, note
+della Leadership, storico, audit, motivazioni, permadeath e uscita definitiva
+dalla gang.
+
+Il database non sparisce e il roster non diventa una lettura Discord-only: resta
+la **proiezione persistente e coerente** dello stato valido dei ruoli Discord.
+
+### Le due modalità
+
+| | `REPORT_ONLY` | `IMPORT_SAFE` |
+| --- | --- | --- |
+| Divergenza costruttiva | `ROLE_SYNC_WARNING` | importata a database |
+| Stato ambiguo | `ROLE_SYNC_WARNING` | `ROLE_SYNC_WARNING` |
+| Operazione distruttiva | `ROLE_SYNC_WARNING` | `ROLE_SYNC_WARNING` |
+| Scritture sul database | nessuna | solo le transizioni sicure |
+
+`REPORT_ONLY` è il **default** e il comportamento storico del bot: chi non
+configura nulla non si ritrova un bot che scrive da solo. Il deployment
+corrente usa `IMPORT_SAFE` (`vars` in `wrangler.jsonc`).
+
+È un **enum, non un booleano**. `AUTO_SYNC=true` non direbbe *fin dove* arriva
+l'automatismo, e un valore non riconosciuto (`IMPORT-SAFE`, `import_safe`,
+`true`) **non ricade in silenzio sul default**: fa fallire lo startup. Un
+refuso deve essere visibile subito, non trasformarsi in un bot che si limita a
+segnalare mentre chi lo ha configurato crede che stia importando.
+
+### Cosa viene importato
+
+| Modifica manuale su Discord | Effetto a database |
+| --- | --- |
+| `Verified` aggiunto | verifica amministrativa (`rpName` = `—`, `oocName` = display name) + `verifiedAt` |
+| `TTP` + un rank aggiunti | `Member` creato, oppure ex membro `LEFT` riattivato |
+| rank cambiato | `Member.rank` aggiornato + `MemberHistory` + **un solo** Put On/Put Off |
+| `Inactive` aggiunto/rimosso | `Member.status` → `INACTIVE` / `ACTIVE` |
+| badge o specializzazione aggiunta/rimossa | `MemberSpecialRole` allineato in entrambe le direzioni |
+
+Badge e specializzazioni coperti: `Shooter`, `Main Shooter`, `Honor 1`,
+`Honor 2`, `Supporter`, `First Day`.
+
+`Friend` e `Mafia` sono già Discord-first e non hanno una tabella dedicata:
+nessuna tabella nuova, nessuna falsa divergenza.
+
+**Nessun import riscrive i ruoli su Discord.** Discord è già nello stato
+desiderato — è la sorgente da cui il piano nasce — quindi riscriverlo sarebbe
+nel migliore dei casi una chiamata sprecata e nel peggiore un ping-pong fra
+cron e comandi.
+
+### Cosa resta comando-only
+
+Anche in `IMPORT_SAFE`, queste situazioni producono **solo** un warning:
+
+| Gesto manuale | Perché non si deduce |
+| --- | --- |
+| rimozione di `TTP` | uscire dalla gang richiede una decisione: `/member remove` |
+| rimozione di tutti i rank | un membro senza rank è uno stato incompleto, non un'uscita |
+| `Permadeath` aggiunto | una morte definitiva non si deduce da un ruolo |
+| `Banned` aggiunto/rimosso | una blacklist ha bisogno di motivazione e autore |
+| rimozione di `Verified` da un membro TTP | la verifica **non** viene revocata |
+| uscita dal server Discord | lasciare il Discord non è lasciare la gang |
+
+In particolare: togliere `TTP` a mano **non** imposta `Member.status = LEFT`, e
+assegnare `Permadeath` a mano **non** marca nessuno come morto.
+
+### Stati ambigui
+
+Uno stato è importabile **solo** se vale tutto quanto segue:
+
+```
+TTP presente
+  AND Verified presente
+  AND esattamente un rank
+  AND utente non blacklistato
+  AND Permadeath assente
+```
+
+Tutto il resto è ambiguo e **non tocca il database**: TTP senza Verified, TTP
+senza rank, TTP con più rank, rank senza TTP, `Inactive` senza membership,
+ruoli speciali su un non membro, accesso a un blacklistato, `Permadeath`
+insieme a TTP.
+
+Uno stato ambiguo produce un `ROLE_SYNC_WARNING` che elenca i ruoli aggiunti e
+rimossi, non concede nessun privilegio amministrativo e non provoca nessuna
+correzione distruttiva. **Non si importa nemmeno la parte valida**: con due rank
+il `Verified` sarebbe di per sé importabile, ma uno stato ambiguo si tratta
+come un blocco, non come qualcosa da cui recuperare i pezzi che tornano.
+
+Lo snapshot **avanza** dopo un warning: altrimenti la stessa segnalazione
+tornerebbe a ogni cron per sempre. La divergenza resta visibile in
+`/system sync-check` finché qualcuno non la sistema.
+
+### Latenza
+
+Il cron gira **ogni 5 minuti** (`triggers.crons` in `wrangler.jsonc`): è la
+latenza massima fra la modifica su Discord e il database. Non esistono webhook
+per i cambi di ruolo senza Gateway, quindi non c'è modo di andare più veloci
+senza pagare un polling più frequente.
+
+### Bootstrap (primo cron dopo il deploy)
+
+I ruoli assegnati **prima** del deploy non produrranno mai una modifica
+osservabile — sono già lì — quindi o entrano nel database al primo cron o non
+ci entrano mai. In `IMPORT_SAFE` il seed iniziale quindi:
+
+- analizza tutti gli stati Discord e importa quelli validi;
+- **non** emette `MEMBER_JOINED_DISCORD`, **non** manda messaggi di benvenuto,
+  **non** pubblica Put On/Put Off;
+- scrive l'audit **solo a database**, senza copia nei canali Discord: centinaia
+  di modifiche legittime farebbero un muro di messaggi in `#audit`;
+- registra una riga aggregata `ROLE_SYNC_BOOTSTRAP` con il report completo
+  (membri importati, rank, verifiche, ruoli speciali, warning, failure);
+- lascia invariati gli stati ambigui o distruttivi.
+
+Funziona anche su una guild mista, dove alcuni record esistono già e altri no.
+
+### L'autore della modifica non è conoscibile
+
+L'elenco dei membri della guild dice *che cosa* è cambiato, non *chi* l'ha
+cambiato. La correttezza della sincronizzazione non dipende dalla risoluzione
+dell'autore: ogni scrittura importata usa
+
+```
+actorDiscordId: null
+metadata: { source: "discord_manual", imported: true }
+```
+
+(`discord_bootstrap` durante l'adozione iniziale). Negli annunci pubblici il
+campo dell'attore mostra *«Modifica manuale su Discord»* invece di una mention
+vuota o di un `<@null>`.
+
+Il Discord Audit Log (`MEMBER_ROLE_UPDATE`) permetterebbe una correlazione
+best-effort per target, ruolo e timestamp: **non è implementato**. Richiederebbe
+il permesso `VIEW_AUDIT_LOG` e, soprattutto, una correlazione incerta
+attribuirebbe a qualcuno una modifica che non ha fatto — peggio che ammettere
+di non saperlo.
+
+### Put On / Put Off sugli import
+
+Un cambio di rank importato pubblica **un solo** annuncio, con la direzione
+calcolata da `compareRanks`. Non ne pubblica nessuno:
+
+- per l'ingresso iniziale importato (entrare a Resident non è una promozione);
+- durante il bootstrap;
+- se il database era già allineato (tipicamente perché un comando ha appena
+  fatto la stessa modifica: il cron se ne accorge e si limita ad aggiornare lo
+  snapshot, senza nuovo storico, audit o annuncio);
+- al cron successivo, perché lo stato è ormai `unchanged`.
+
+Un errore di pubblicazione viene loggato e basta: l'annuncio non è il dato
+autorevole, e il cambio di rank importato resta valido.
+
+### Concorrenza
+
+`memberMutex` vive nella memoria di **un** isolate Cloudflare: non protegge da
+due invocazioni diverse del Worker. La difesa vera è il database.
+
+- Le mutazioni di `Member` passano da `updateWithVersion` con `Member.version`.
+  Su conflitto si rilegge lo stato: se la transizione desiderata è **già**
+  avvenuta l'operazione è completa e non viene ri-storicizzata; se non lo è, il
+  conflitto non è risolvibile in sicurezza e lo snapshot **non avanza**.
+- Le creazioni si affidano ai vincoli unique. Una unique violation attesa
+  (`P2002`) non è un guasto: è il meccanismo che impedisce il doppione, e si
+  gestisce rileggendo la riga esistente — mai trasformandola in un errore
+  permanente. Un errore di database vero, invece, resta un errore.
+
+### Rollback a `REPORT_ONLY`
+
+Nessuna migration da annullare e nessun dato da ripristinare: i record importati
+sono record validi e restano tali.
+
+```bash
+# 1. in wrangler.jsonc, vars:
+#      "ROLE_SYNC_MODE": "REPORT_ONLY"
+# 2. ridistribuisci
+npm run worker:deploy
+```
+
+Dal cron successivo il bot torna a segnalare senza scrivere. Per una verifica
+immediata: `/system sync-check` mostra `ROLE_SYNC_MODE = REPORT_ONLY` e indica
+il comando da usare per ogni divergenza invece di dire che il cron la risolverà.
 
 ### Messaggi di benvenuto e addio
 

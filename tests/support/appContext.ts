@@ -103,7 +103,6 @@ export function createTestAppContext(): TestAppContext {
 
   const reconciliation = createMemberReconciliationService({
     repos: harness.repos,
-    roles: harness.roleService,
     roleRegistry: harness.roles,
     audit: harness.audit,
     blacklist: harness.blacklist,
@@ -111,6 +110,7 @@ export function createTestAppContext(): TestAppContext {
       messages: gateway,
       channels: { welcome: channels.welcome, goodbye: channels.goodbye },
     }),
+    roleImport: harness.roleImport,
     listAllGuildMembers: () => Promise.resolve(snapshots()),
     guildId: GUILD_ID,
   });
@@ -135,6 +135,7 @@ export function createTestAppContext(): TestAppContext {
     community: harness.community,
     blacklist: harness.blacklist,
     consistency: harness.consistency,
+    roleImport: harness.roleImport,
     stats: createStatsService({ repos: harness.repos }),
     panels: createPanelService({
       panels: harness.repos.panels,

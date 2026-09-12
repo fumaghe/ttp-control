@@ -35,7 +35,8 @@ export interface RankAnnouncementGateway {
 
 export interface RankAnnouncementInput {
   readonly memberDiscordId: string;
-  readonly actorDiscordId: string;
+  /** `null` quando l'autore non e' conoscibile (sincronizzazione automatica). */
+  readonly actorDiscordId: string | null;
   readonly fromRank: MemberRank;
   readonly toRank: MemberRank;
   readonly reason?: string | null | undefined;

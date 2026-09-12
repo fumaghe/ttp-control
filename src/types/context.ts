@@ -19,6 +19,7 @@ import type { AuthorizationService } from '../services/authorizationService.js';
 import type { BlacklistService } from '../services/blacklistService.js';
 import type { CommunityService } from '../services/communityService.js';
 import type { ConsistencyService } from '../services/consistencyService.js';
+import type { DiscordRoleImportService } from '../services/discordRoleImportService.js';
 import type { MemberService } from '../services/memberService.js';
 import type { MemberReconciliationService } from '../services/memberReconciliationService.js';
 import type { GuildMemberSnapshot } from '../services/roleGateway.js';
@@ -48,6 +49,14 @@ export interface AppContext {
   readonly community: CommunityService;
   readonly blacklist: BlacklistService;
   readonly consistency: ConsistencyService;
+  /**
+   * Import dei ruoli assegnati a mano su Discord.
+   *
+   * Esposto nel contesto perche' e' la definizione autorevole di cosa sia
+   * importabile: cron e `/system sync-check` la chiedono a lui invece di
+   * tenerne una copia per uno.
+   */
+  readonly roleImport: DiscordRoleImportService;
   readonly stats: StatsService;
   readonly panels: PanelService;
   readonly reconciliation: MemberReconciliationService;

@@ -264,6 +264,14 @@ export function createInMemoryRepositories(store: InMemoryStore): Repositories {
         return store.members.get(id) ?? null;
       },
       async create(input): Promise<Member> {
+        // Riproduce il vincolo `discordId @unique`: e' proprio quello a
+        // impedire il doppione quando due esecuzioni concorrenti partono
+        // entrambe da "questo membro non esiste".
+        const duplicate = [...store.members.values()].find((m) => m.discordId === input.discordId);
+        if (duplicate) {
+          throw new Error('Unique constraint failed on the fields: (`discordId`)');
+        }
+
         const record: Member = {
           id: nextId('mem'),
           discordId: input.discordId,

@@ -202,3 +202,41 @@ describe('configurazione malformata', () => {
     expect(() => loadEnv(completeEnv({ LOG_LEVEL: 'verbose' }))).toThrow(EnvironmentError);
   });
 });
+
+describe('ROLE_SYNC_MODE', () => {
+  it('vale REPORT_ONLY quando non è configurato', () => {
+    // Il default conservativo conta: chi non configura nulla non deve
+    // ritrovarsi un bot che scrive sul database da solo.
+    expect(loadEnv(completeEnv()).roleSyncMode).toBe('REPORT_ONLY');
+  });
+
+  it('accetta i due valori previsti', () => {
+    expect(loadEnv(completeEnv({ ROLE_SYNC_MODE: 'IMPORT_SAFE' })).roleSyncMode).toBe(
+      'IMPORT_SAFE',
+    );
+    resetEnvCache();
+    expect(loadEnv(completeEnv({ ROLE_SYNC_MODE: 'REPORT_ONLY' })).roleSyncMode).toBe(
+      'REPORT_ONLY',
+    );
+  });
+
+  it.each(['IMPORT-SAFE', 'import_safe', 'true', 'AUTO'])(
+    'rifiuta il valore non riconosciuto %p invece di ricadere sul default',
+    (value) => {
+      // Un refuso deve essere visibile subito: ricadere in silenzio su
+      // REPORT_ONLY darebbe un bot che si limita a segnalare mentre chi lo ha
+      // configurato crede che stia importando.
+      expect(() => loadEnv(completeEnv({ ROLE_SYNC_MODE: value }))).toThrow(EnvironmentError);
+    },
+  );
+
+  it('il messaggio d’errore elenca i valori ammessi', () => {
+    try {
+      loadEnv(completeEnv({ ROLE_SYNC_MODE: 'SI' }));
+      expect.unreachable('doveva fallire');
+    } catch (error) {
+      expect(String(error)).toContain('REPORT_ONLY');
+      expect(String(error)).toContain('IMPORT_SAFE');
+    }
+  });
+});

@@ -1,0 +1,24 @@
+-- =============================================================================
+-- TTP CONTROL — audit dell'adozione iniziale dei ruoli Discord
+-- =============================================================================
+-- Aggiunge un solo valore all'enum `AuditAction`:
+--
+--   ROLE_SYNC_BOOTSTRAP
+--
+-- E' l'evento aggregato scritto UNA volta, alla prima esecuzione del cron su
+-- una guild senza snapshot, quando `ROLE_SYNC_MODE=IMPORT_SAFE` adotta a
+-- database i ruoli gia' assegnati su Discord prima del deploy.
+--
+-- Le singole modifiche di quell'adozione restano registrate con le azioni di
+-- dominio che gia' esistono (TTP_ADDED, PROMOTED, SPECIAL_ROLE_ADDED, ...),
+-- riconoscibili dal `metadata.source = 'discord_bootstrap'`. Questo valore
+-- serve al report d'insieme: quanti membri, quanti rank, quanti warning — cioe'
+-- l'unica riga che dice "il bootstrap e' avvenuto, ed e' andata cosi'".
+--
+-- MIGRAZIONE NON DISTRUTTIVA: aggiunge un valore, non ne rinomina e non ne
+-- rimuove nessuno. Nessuna riga esistente viene toccata, e il codice
+-- precedente continua a funzionare senza modifiche.
+--
+-- `IF NOT EXISTS` rende l'istruzione ripetibile: riapplicare la migration su un
+-- database che l'ha gia' ricevuta non fallisce.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'ROLE_SYNC_BOOTSTRAP';

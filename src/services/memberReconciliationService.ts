@@ -7,20 +7,36 @@
  * periodicamente lo stato Discord con l'ultimo snapshot salvato e ne deduce
  * gli stessi eventi.
  *
- * PRINCIPIO INVARIATO: il bot OSSERVA e SEGNALA, non corregge da solo.
- *  - uscire dal Discord NON è lasciare la gang: nessun `LEFT_TTP` automatico,
- *    nessun `/member remove` implicito;
- *  - una modifica manuale dei ruoli produce un `ROLE_SYNC_WARNING`, mai una
- *    sincronizzazione distruttiva;
+ * DUE MODALITÀ, UNA SOLA DEFINIZIONE DELLE REGOLE (`ROLE_SYNC_MODE`):
+ *
+ *  - `REPORT_ONLY` rileva e segnala con un `ROLE_SYNC_WARNING`, senza scrivere
+ *    nulla sul database. È il comportamento storico del bot.
+ *  - `IMPORT_SAFE` importa a database le transizioni COSTRUTTIVE e non ambigue.
+ *
+ * Le due modalità NON hanno due implementazioni: entrambe chiedono lo stesso
+ * piano a `planRoleImport` e cambiano solo cosa ne fanno — una lo racconta,
+ * l'altra lo applica. È l'unico modo perché un `REPORT_ONLY` che dice "ecco
+ * cosa importerei" e l'`IMPORT_SAFE` che poi lo importa restino d'accordo.
+ *
+ * COSA NON VIENE MAI DEDOTTO, in nessuna modalità:
+ *  - uscire dal Discord NON è lasciare la gang: nessun `LEFT_TTP` automatico;
+ *  - togliere TTP a mano non imposta `LEFT`, e azzerare i rank non toglie la
+ *    membership: servono `/member remove` e `/member rank`;
+ *  - il ruolo `Banned` non crea una blacklist, e `Permadeath` non marca nessuno
+ *    come morto: entrambe richiedono una motivazione e un autore, che un ruolo
+ *    Discord non porta con sé;
  *  - la blacklist a database resta autorevole al rientro.
  *
  * ISOLAMENTO DEGLI ERRORI: ogni membro è indipendente. Se il trattamento di
  * un membro fallisce, il suo snapshot NON viene aggiornato — così la
  * prossima esecuzione riprova invece di dare per fatto qualcosa che non è
- * successo. È questo che rende il cron sicuro da ripetere.
+ * successo. È questo che rende il cron sicuro da ripetere. Uno stato solo
+ * AMBIGUO invece non è un fallimento: si segnala e lo snapshot avanza, altrimenti
+ * la stessa segnalazione tornerebbe a ogni esecuzione per sempre.
  */
 import { AuditAction, MemberStatus } from '../generated/prisma/enums.js';
 import { RANK_LABEL } from '../config/constants.js';
+import type { RoleSyncMode } from '../config/env.js';
 import type { RoleRegistry } from '../config/roles.js';
 import type {
   GuildMemberSnapshotRepository,
@@ -30,24 +46,44 @@ import type {
 import { createLogger } from '../utils/logger.js';
 import type { AuditService } from './auditService.js';
 import type { BlacklistService } from './blacklistService.js';
+import type {
+  DiscordRoleImportService,
+  ImportedRoleChange,
+  RoleImportOutcome,
+} from './discordRoleImportService.js';
+import { describeRoleImportAction } from './discordRoleState.js';
 import type { MemberLifecycleMessageService } from './memberLifecycleMessageService.js';
 import type { GuildMemberSnapshot } from './roleGateway.js';
-import type { RoleService } from './roleService.js';
 
 const log = createLogger('reconciliation');
 
 export interface ReconciliationReport {
+  /** Modalità con cui il cron ha girato. */
+  readonly mode: RoleSyncMode;
   /** Membri Discord osservati in questa esecuzione. */
   readonly scanned: number;
   readonly joined: number;
   readonly left: number;
   readonly roleChanges: number;
+  /** Membri per cui almeno una modifica è stata scritta a database. */
+  readonly imports: number;
   /** Divergenze rilevate e segnalate, mai corrette. */
   readonly warnings: number;
+  /** Stati che un fatto autorevole a database vieta di importare. */
+  readonly blocked: number;
   /** Rientri di utenti in blacklist. */
   readonly blacklistedRejoins: number;
   /** Membri il cui trattamento è fallito: riprovati alla prossima esecuzione. */
   readonly failures: number;
+
+  // --- Dettaglio di cosa è stato importato --------------------------------
+  readonly membersCreated: number;
+  readonly membersReactivated: number;
+  readonly ranksUpdated: number;
+  readonly statusesUpdated: number;
+  readonly specialRolesUpdated: number;
+  readonly verificationsImported: number;
+
   /** Messaggi di benvenuto effettivamente pubblicati (best-effort). */
   readonly welcomeMessages: number;
   /** Messaggi di addio effettivamente pubblicati (best-effort). */
@@ -55,9 +91,64 @@ export interface ReconciliationReport {
   /**
    * Prima esecuzione su una guild senza snapshot: lo stato viene fotografato
    * SENZA emettere eventi di join, che sarebbero centinaia di falsi positivi.
+   * In `IMPORT_SAFE` i ruoli già presenti vengono comunque adottati.
    */
   readonly seeded: boolean;
   readonly durationMs: number;
+}
+
+/** Conteggi delle modifiche importate, accumulati durante un'esecuzione. */
+interface ImportTally {
+  members: number;
+  membersCreated: number;
+  membersReactivated: number;
+  ranksUpdated: number;
+  statusesUpdated: number;
+  specialRolesUpdated: number;
+  verificationsImported: number;
+}
+
+function emptyTally(): ImportTally {
+  return {
+    members: 0,
+    membersCreated: 0,
+    membersReactivated: 0,
+    ranksUpdated: 0,
+    statusesUpdated: 0,
+    specialRolesUpdated: 0,
+    verificationsImported: 0,
+  };
+}
+
+function tallyChanges(tally: ImportTally, changes: readonly ImportedRoleChange[]): void {
+  if (changes.length > 0) tally.members += 1;
+  for (const change of changes) {
+    switch (change.kind) {
+      case 'create-member':
+        tally.membersCreated += 1;
+        break;
+      case 'reactivate-member':
+        tally.membersReactivated += 1;
+        break;
+      case 'set-rank':
+        tally.ranksUpdated += 1;
+        break;
+      case 'set-status':
+        tally.statusesUpdated += 1;
+        break;
+      case 'add-special-role':
+      case 'remove-special-role':
+        tally.specialRolesUpdated += 1;
+        break;
+      case 'import-verification':
+        tally.verificationsImported += 1;
+        break;
+      default: {
+        const exhaustive: never = change.kind;
+        throw new Error(`Modifica di import sconosciuta: ${String(exhaustive)}`);
+      }
+    }
+  }
 }
 
 export interface MemberReconciliationService {
@@ -87,12 +178,33 @@ export function hashRoleIds(roleIds: Iterable<string>): string {
 
 export interface ReconciliationDeps {
   readonly repos: Repositories & { readonly snapshots: GuildMemberSnapshotRepository };
-  readonly roles: RoleService;
+  /**
+   * Registry dei ruoli: serve solo a ETICHETTARE i ruoli nei warning.
+   *
+   * Non c'è nessun `RoleService` fra le dipendenze, ed è deliberato: la
+   * riconciliazione non assegna e non rimuove ruoli Discord, quindi non deve
+   * nemmeno avere sottomano gli strumenti per farlo.
+   */
   readonly roleRegistry: RoleRegistry;
   readonly audit: AuditService;
   readonly blacklist: BlacklistService;
   readonly listAllGuildMembers: () => Promise<GuildMemberSnapshot[]>;
   readonly guildId: string;
+  /**
+   * Che cosa fare di una modifica manuale dei ruoli. Default: `REPORT_ONLY`,
+   * cioè il comportamento storico — un bot che non scrive da solo sul database
+   * non deve poterlo diventare per dimenticanza.
+   */
+  readonly mode?: RoleSyncMode | undefined;
+  /**
+   * Calcolo e applicazione delle importazioni.
+   *
+   * NON opzionale, nemmeno in `REPORT_ONLY`: anche solo per descrivere una
+   * divergenza servono le stesse regole che la importerebbero, e tenerne una
+   * seconda copia qui dentro è esattamente il modo in cui report e import
+   * finirebbero per non essere più d'accordo.
+   */
+  readonly roleImport: DiscordRoleImportService;
   /**
    * Messaggi pubblici di benvenuto/addio. Opzionale: senza, la
    * riconciliazione si comporta esattamente come prima di questa feature.
@@ -103,7 +215,8 @@ export interface ReconciliationDeps {
 export function createMemberReconciliationService(
   deps: ReconciliationDeps,
 ): MemberReconciliationService {
-  const { repos, roles, roleRegistry, audit, blacklist, lifecycle, guildId } = deps;
+  const { repos, roleRegistry, audit, blacklist, lifecycle, roleImport, guildId } = deps;
+  const mode: RoleSyncMode = deps.mode ?? 'REPORT_ONLY';
 
   /**
    * Sostituisce `guildMemberAdd`.
@@ -183,16 +296,72 @@ export function createMemberReconciliationService(
     return { warned: false };
   }
 
+  /** Etichetta leggibile di un ruolo Discord, per i messaggi di warning. */
+  function roleLabel(roleId: string): string {
+    return roleRegistry.all.find((descriptor) => descriptor.id === roleId)?.label ?? roleId;
+  }
+
+  /**
+   * Registra una divergenza non importata.
+   *
+   * Dice sempre QUALI ruoli sono cambiati, non solo che qualcosa non torna:
+   * senza quell'elenco un operatore deve ricostruire da sé cosa è successo
+   * confrontando a occhio i ruoli del membro.
+   */
+  async function warnAboutDivergence(
+    snapshot: GuildMemberSnapshot,
+    reasons: readonly string[],
+    added: readonly string[],
+    removed: readonly string[],
+    extra: Record<string, boolean | string>,
+  ): Promise<void> {
+    await audit.record(
+      {
+        action: AuditAction.ROLE_SYNC_WARNING,
+        // Nessun attore: l'elenco dei membri della guild dice cosa è cambiato,
+        // non chi l'ha cambiato.
+        actorDiscordId: null,
+        targetDiscordId: snapshot.discordId,
+        reason: reasons.join('\n'),
+        metadata: {
+          added: added.map(roleLabel),
+          removed: removed.map(roleLabel),
+          // Il bot non ha toccato nulla: la correzione è una decisione umana.
+          autoCorrected: false,
+          source: 'reconciliation',
+          mode,
+          ...extra,
+        },
+      },
+      ['audit'],
+    );
+
+    log.warn(
+      { discordId: snapshot.discordId, reasons, mode },
+      'Divergenza rilevata durante la riconciliazione',
+    );
+  }
+
+  /** Esito del trattamento di un singolo membro con i ruoli cambiati. */
+  interface RoleChangeOutcome {
+    readonly warned: boolean;
+    readonly blocked: boolean;
+    readonly changes: readonly ImportedRoleChange[];
+  }
+
+  const NO_CHANGE: RoleChangeOutcome = { warned: false, blocked: false, changes: [] };
+
   /**
    * Sostituisce `guildMemberUpdate`.
    *
-   * Confronta i ruoli gestiti con lo snapshot precedente e applica gli stessi
-   * consistency check della V1. NESSUNA correzione automatica.
+   * Confronta i ruoli gestiti con lo snapshot precedente e, a seconda della
+   * modalità, importa o segnala. Le REGOLE sono le stesse in entrambi i casi:
+   * `planRoleImport` è l'unico posto in cui vivono.
    */
   async function handleRoleChange(
     snapshot: GuildMemberSnapshot,
     previous: GuildMemberSnapshotRow,
-  ): Promise<{ warned: boolean }> {
+  ): Promise<RoleChangeOutcome> {
     const before = new Set(previous.roleIds);
     const after = snapshot.roleIds;
 
@@ -203,88 +372,111 @@ export function createMemberReconciliationService(
     const managedIds = new Set(roleRegistry.managed.map((descriptor) => descriptor.id));
     const relevantAdded = added.filter((id) => managedIds.has(id));
     const relevantRemoved = removed.filter((id) => managedIds.has(id));
-    if (relevantAdded.length === 0 && relevantRemoved.length === 0) return { warned: false };
+    if (relevantAdded.length === 0 && relevantRemoved.length === 0) return NO_CHANGE;
 
-    const dbMember = await repos.members.findByDiscordId(snapshot.discordId);
-    const verification = await repos.verifications.findActive(snapshot.discordId);
-
-    const divergences: string[] = [];
-
-    const isTtp = roles.isTtp(snapshot);
-    const inGang =
-      dbMember !== null &&
-      (dbMember.status === MemberStatus.ACTIVE || dbMember.status === MemberStatus.INACTIVE);
-
-    if (isTtp !== inGang) {
-      divergences.push(
-        isTtp
-          ? 'Ha il ruolo TTP ma a database non risulta membro attivo.'
-          : 'Risulta membro a database ma non ha più il ruolo TTP.',
-      );
+    if (mode === 'IMPORT_SAFE') {
+      const outcome = await roleImport.importMember({ snapshot });
+      return handleImportOutcome(snapshot, outcome, relevantAdded, relevantRemoved);
     }
 
-    const ranks = roles.readAllRanks(snapshot);
-    if (ranks.length > 1) {
-      divergences.push(`Ha ${ranks.length} rank contemporaneamente.`);
-    }
-    const soleRank = ranks.length === 1 ? ranks[0] : undefined;
-    if (dbMember && inGang && soleRank !== undefined && soleRank !== dbMember.rank) {
-      divergences.push(
-        `Rank Discord (${RANK_LABEL[soleRank]}) diverso dal database (${RANK_LABEL[dbMember.rank]}).`,
-      );
-    }
+    // --- REPORT_ONLY -------------------------------------------------------
+    // Stesso piano dell'import, raccontato invece che applicato. Le azioni che
+    // `IMPORT_SAFE` eseguirebbe qui diventano righe di un warning, così le due
+    // modalità non possono divergere nel giudizio su uno stesso stato.
+    const plan = await roleImport.planFor(snapshot);
 
-    const isVerified = roles.isVerified(snapshot);
-    if (isTtp && !isVerified) {
-      divergences.push('Ha il ruolo TTP ma non Verified: viola `TTP ⇒ Verified`.');
-    }
-    if (isVerified !== (verification !== null)) {
-      divergences.push(
-        isVerified
-          ? 'Ha il ruolo Verified ma nessuna verifica attiva a database.'
-          : 'Ha una verifica attiva a database ma non il ruolo Verified.',
-      );
-    }
+    switch (plan.kind) {
+      case 'unchanged':
+        return NO_CHANGE;
 
-    // `Inactive` è additivo e non deve divergere dallo stato a database.
-    if (dbMember && inGang) {
-      const hasInactiveRole = after.has(roleRegistry.inactive);
-      const shouldBeInactive = dbMember.status === MemberStatus.INACTIVE;
-      if (hasInactiveRole !== shouldBeInactive) {
-        divergences.push(
-          shouldBeInactive
-            ? 'È INACTIVE a database ma il ruolo Inactive è stato rimosso a mano.'
-            : 'Ha il ruolo Inactive su Discord ma a database è ACTIVE.',
+      case 'blocked':
+        await warnAboutDivergence(
+          snapshot,
+          [plan.issue.detail, plan.issue.suggestion],
+          relevantAdded,
+          relevantRemoved,
+          { importable: false },
         );
+        return { warned: true, blocked: true, changes: [] };
+
+      case 'warning':
+        await warnAboutDivergence(
+          snapshot,
+          plan.issues.map((entry) => entry.detail),
+          relevantAdded,
+          relevantRemoved,
+          { importable: false },
+        );
+        return { warned: true, blocked: false, changes: [] };
+
+      case 'actions':
+        await warnAboutDivergence(
+          snapshot,
+          [
+            ...plan.actions.map(describeRoleImportAction),
+            'Nessuna modifica applicata: ROLE_SYNC_MODE è REPORT_ONLY.',
+          ],
+          relevantAdded,
+          relevantRemoved,
+          { importable: true },
+        );
+        return { warned: true, blocked: false, changes: [] };
+
+      default: {
+        const exhaustive: never = plan;
+        throw new Error(`Piano di import sconosciuto: ${JSON.stringify(exhaustive)}`);
       }
     }
+  }
 
-    if (divergences.length === 0) return { warned: false };
+  /**
+   * Traduce l'esito di un import in contatori e segnalazioni.
+   *
+   * Uno stato ambiguo produce un warning ma NON è un fallimento: lo snapshot
+   * avanza comunque, altrimenti la stessa segnalazione tornerebbe a ogni cron
+   * finché qualcuno non sistema i ruoli a mano. Resta visibile in
+   * `/system sync-check`, che è il posto giusto per guardarla.
+   */
+  async function handleImportOutcome(
+    snapshot: GuildMemberSnapshot,
+    outcome: RoleImportOutcome,
+    relevantAdded: readonly string[],
+    relevantRemoved: readonly string[],
+  ): Promise<RoleChangeOutcome> {
+    switch (outcome.kind) {
+      case 'unchanged':
+        // Il database era già allineato: tipicamente un comando ha appena
+        // fatto la stessa modifica e il cron sta solo osservando l'effetto.
+        // Nessuno storico, nessun annuncio, nessun audit duplicato.
+        return NO_CHANGE;
 
-    const nameOf = (id: string): string =>
-      roleRegistry.all.find((descriptor) => descriptor.id === id)?.label ?? id;
+      case 'imported':
+        log.info(
+          {
+            discordId: snapshot.discordId,
+            changes: outcome.changes.map((change) => change.detail),
+          },
+          'Ruoli Discord importati a database',
+        );
+        return { warned: false, blocked: false, changes: outcome.changes };
 
-    await audit.record(
-      {
-        action: AuditAction.ROLE_SYNC_WARNING,
-        targetDiscordId: snapshot.discordId,
-        reason: divergences.join('\n'),
-        metadata: {
-          added: relevantAdded.map(nameOf),
-          removed: relevantRemoved.map(nameOf),
-          // Il bot non tocca nulla: la correzione è una decisione umana.
-          autoCorrected: false,
-          source: 'reconciliation',
-        },
-      },
-      ['audit'],
-    );
+      case 'warning':
+        await warnAboutDivergence(snapshot, outcome.reasons, relevantAdded, relevantRemoved, {
+          importable: false,
+        });
+        return { warned: true, blocked: false, changes: [] };
 
-    log.warn(
-      { discordId: snapshot.discordId, divergences },
-      'Divergenza rilevata durante la riconciliazione',
-    );
-    return { warned: true };
+      case 'blocked':
+        await warnAboutDivergence(snapshot, [outcome.reason], relevantAdded, relevantRemoved, {
+          importable: false,
+        });
+        return { warned: true, blocked: true, changes: [] };
+
+      default: {
+        const exhaustive: never = outcome;
+        throw new Error(`Esito di import sconosciuto: ${JSON.stringify(exhaustive)}`);
+      }
+    }
   }
 
   /**
@@ -334,6 +526,144 @@ export function createMemberReconciliationService(
     return { welcome, goodbye };
   }
 
+  /**
+   * Prima esecuzione su una guild senza snapshot.
+   *
+   * Due preoccupazioni opposte da tenere insieme:
+   *
+   *  - NON emettere eventi. Chi c'era già non è "appena arrivato": niente
+   *    MEMBER_JOINED_DISCORD, niente messaggi di benvenuto, niente Put On/Put
+   *    Off. Al primo cron sarebbero centinaia di notifiche false e un ping a
+   *    tutto il server.
+   *  - In `IMPORT_SAFE`, ADOTTARE comunque lo stato. I ruoli assegnati prima
+   *    del deploy non produrranno mai un cambiamento osservabile, quindi o
+   *    entrano nel database adesso o non ci entreranno mai.
+   *
+   * Funziona anche su una guild mista, dove alcuni record esistono già e altri
+   * no: ogni membro viene valutato per conto proprio, e chi è già allineato
+   * risulta semplicemente `unchanged`.
+   */
+  async function seedGuild(
+    current: readonly GuildMemberSnapshot[],
+    now: Date,
+    startedAt: number,
+  ): Promise<ReconciliationReport> {
+    const tally = emptyTally();
+    let warnings = 0;
+    let blocked = 0;
+    let failures = 0;
+
+    const toPersist: Parameters<GuildMemberSnapshotRepository['upsertMany']>[0][number][] = [];
+
+    for (const snapshot of current) {
+      if (mode === 'IMPORT_SAFE') {
+        try {
+          // `bootstrap: true`: audit solo a database (niente muro di messaggi
+          // nei canali Discord) e nessun annuncio pubblico.
+          const outcome = await roleImport.importMember({ snapshot, bootstrap: true });
+          switch (outcome.kind) {
+            case 'imported':
+              tallyChanges(tally, outcome.changes);
+              break;
+            case 'warning':
+              // Stato ambiguo: si conta e si lascia esattamente com'è.
+              // `/system sync-check` continuerà a mostrarlo finché un umano non
+              // decide. Nessun warning per membro nei canali: è un bootstrap.
+              warnings += 1;
+              break;
+            case 'blocked':
+              blocked += 1;
+              break;
+            case 'unchanged':
+              break;
+            default: {
+              const exhaustive: never = outcome;
+              throw new Error(`Esito di import sconosciuto: ${JSON.stringify(exhaustive)}`);
+            }
+          }
+        } catch (error) {
+          // Stessa regola del regime normale: snapshot non scritto, quindi il
+          // prossimo cron tratterà questo membro come una modifica da valutare.
+          failures += 1;
+          log.error(
+            { err: error, discordId: snapshot.discordId },
+            'Adozione iniziale del membro fallita: sarà riprovata',
+          );
+          continue;
+        }
+      }
+
+      toPersist.push({
+        guildId,
+        discordId: snapshot.discordId,
+        inGuild: true,
+        roleIds: [...snapshot.roleIds],
+        rolesHash: hashRoleIds(snapshot.roleIds),
+        nickname: snapshot.displayName,
+        seenAt: now,
+      });
+    }
+
+    if (toPersist.length > 0) await repos.snapshots.upsertMany(toPersist);
+
+    const report: ReconciliationReport = {
+      mode,
+      scanned: current.length,
+      joined: 0,
+      left: 0,
+      roleChanges: 0,
+      imports: tally.members,
+      warnings,
+      blocked,
+      blacklistedRejoins: 0,
+      failures,
+      membersCreated: tally.membersCreated,
+      membersReactivated: tally.membersReactivated,
+      ranksUpdated: tally.ranksUpdated,
+      statusesUpdated: tally.statusesUpdated,
+      specialRolesUpdated: tally.specialRolesUpdated,
+      verificationsImported: tally.verificationsImported,
+      // NESSUN benvenuto qui: il seed non è un'ondata di arrivi, è la
+      // fotografia di chi c'era già.
+      welcomeMessages: 0,
+      goodbyeMessages: 0,
+      seeded: true,
+      durationMs: Date.now() - startedAt,
+    };
+
+    // Una sola riga aggregata, non una per membro: è il report che dice
+    // "l'adozione è avvenuta, ed è andata così". Le singole modifiche restano
+    // tracciate dalle rispettive azioni di dominio, riconoscibili dal
+    // `metadata.source = 'discord_bootstrap'`.
+    if (mode === 'IMPORT_SAFE') {
+      await audit.record(
+        {
+          action: AuditAction.ROLE_SYNC_BOOTSTRAP,
+          actorDiscordId: null,
+          reason: 'Adozione iniziale dei ruoli Discord già assegnati prima del deploy',
+          metadata: {
+            source: 'discord_bootstrap',
+            scanned: report.scanned,
+            imports: report.imports,
+            membersCreated: report.membersCreated,
+            membersReactivated: report.membersReactivated,
+            ranksUpdated: report.ranksUpdated,
+            statusesUpdated: report.statusesUpdated,
+            specialRolesUpdated: report.specialRolesUpdated,
+            verificationsImported: report.verificationsImported,
+            warnings: report.warnings,
+            blocked: report.blocked,
+            failures: report.failures,
+          },
+        },
+        ['audit'],
+      );
+    }
+
+    log.info({ ...report }, 'Snapshot iniziale della guild registrato');
+    return report;
+  }
+
   return {
     async run(): Promise<ReconciliationReport> {
       const startedAt = Date.now();
@@ -346,47 +676,26 @@ export function createMemberReconciliationService(
       const previousById = new Map(previousRows.map((row) => [row.discordId, row]));
       const now = new Date();
 
-      // --- Prima esecuzione: si fotografa e basta -------------------------
-      // Senza questo, il primo cron su una guild già popolata emetterebbe un
-      // MEMBER_JOINED_DISCORD per ogni membro esistente.
+      // --- Prima esecuzione ------------------------------------------------
+      // Senza un trattamento a parte, il primo cron su una guild già popolata
+      // emetterebbe un MEMBER_JOINED_DISCORD per ogni membro esistente.
+      //
+      // In `IMPORT_SAFE` però non basta fotografare: i ruoli assegnati PRIMA
+      // del deploy non produrranno mai una modifica osservabile — sono già lì —
+      // e senza questo passaggio resterebbero fuori dal database per sempre.
+      // Quindi si adottano ora, in silenzio.
       if (previousRows.length === 0) {
-        await repos.snapshots.upsertMany(
-          current.map((snapshot) => ({
-            guildId,
-            discordId: snapshot.discordId,
-            inGuild: true,
-            roleIds: [...snapshot.roleIds],
-            rolesHash: hashRoleIds(snapshot.roleIds),
-            nickname: snapshot.displayName,
-            seenAt: now,
-          })),
-        );
-
-        // NESSUN benvenuto qui: il seed non è un'ondata di arrivi, è la
-        // fotografia di chi c'era già. Mandarli significherebbe taggare
-        // l'intero server al primo cron.
-        log.info({ members: current.length }, 'Snapshot iniziale della guild registrato');
-        return {
-          scanned: current.length,
-          joined: 0,
-          left: 0,
-          roleChanges: 0,
-          warnings: 0,
-          blacklistedRejoins: 0,
-          failures: 0,
-          welcomeMessages: 0,
-          goodbyeMessages: 0,
-          seeded: true,
-          durationMs: Date.now() - startedAt,
-        };
+        return await seedGuild(current, now, startedAt);
       }
 
       let joined = 0;
       let left = 0;
       let roleChanges = 0;
       let warnings = 0;
+      let blocked = 0;
       let blacklistedRejoins = 0;
       let failures = 0;
+      const tally = emptyTally();
 
       const toPersist: Parameters<GuildMemberSnapshotRepository['upsertMany']>[0][number][] = [];
 
@@ -411,11 +720,30 @@ export function createMemberReconciliationService(
               // silenzio, non con un benvenuto pubblico.
             } else {
               pendingWelcomes.push(snapshot);
+
+              // Un join va valutato come ogni altro stato, anche se è il primo.
+              //
+              // Chi RIENTRA si porta dietro i ruoli di prima, che Discord
+              // conserva. Ma anche un arrivo nuovo può avere già dei ruoli, se
+              // qualcuno glieli assegna nei minuti fra l'ingresso e questo
+              // cron: lo snapshot li fotograferebbe come stato di partenza e
+              // da quel momento non risulterebbero più "cambiati", quindi non
+              // verrebbero importati mai più. Per chi non ha nessun ruolo
+              // gestito il piano è vuoto e questa chiamata non fa nulla.
+              if (mode === 'IMPORT_SAFE') {
+                const imported = await roleImport.importMember({ snapshot });
+                const result = await handleImportOutcome(snapshot, imported, [], []);
+                if (result.warned) warnings += 1;
+                if (result.blocked) blocked += 1;
+                tallyChanges(tally, result.changes);
+              }
             }
           } else if (previous.rolesHash !== rolesHash) {
             roleChanges += 1;
             const outcome = await handleRoleChange(snapshot, previous);
             if (outcome.warned) warnings += 1;
+            if (outcome.blocked) blocked += 1;
+            tallyChanges(tally, outcome.changes);
           }
 
           toPersist.push({
@@ -465,13 +793,22 @@ export function createMemberReconciliationService(
       const messages = await dispatchLifecycleMessages(pendingWelcomes, pendingGoodbyes);
 
       const report: ReconciliationReport = {
+        mode,
         scanned: current.length,
         joined,
         left,
         roleChanges,
+        imports: tally.members,
         warnings,
+        blocked,
         blacklistedRejoins,
         failures,
+        membersCreated: tally.membersCreated,
+        membersReactivated: tally.membersReactivated,
+        ranksUpdated: tally.ranksUpdated,
+        statusesUpdated: tally.statusesUpdated,
+        specialRolesUpdated: tally.specialRolesUpdated,
+        verificationsImported: tally.verificationsImported,
         welcomeMessages: messages.welcome,
         goodbyeMessages: messages.goodbye,
         seeded: false,

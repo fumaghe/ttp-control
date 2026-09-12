@@ -20,3 +20,8 @@ DISCORD_PUBLIC_KEY=
 
 # Connection string Neon, usata quando il binding Hyperdrive non c'è.
 DATABASE_URL=
+
+# ROLE_SYNC_MODE non è un secret e in produzione sta in `vars` dentro
+# wrangler.jsonc. Si può però sovrascrivere qui per provare in locale l'import
+# senza toccare la configurazione deployata: REPORT_ONLY | IMPORT_SAFE.
+# ROLE_SYNC_MODE=IMPORT_SAFE

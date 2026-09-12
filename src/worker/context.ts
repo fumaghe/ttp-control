@@ -23,6 +23,7 @@ import { createAuthorizationService } from '../services/authorizationService.js'
 import { createBlacklistService } from '../services/blacklistService.js';
 import { createCommunityService } from '../services/communityService.js';
 import { createConsistencyService } from '../services/consistencyService.js';
+import { createDiscordRoleImportService } from '../services/discordRoleImportService.js';
 import { createMemberLifecycleMessageService } from '../services/memberLifecycleMessageService.js';
 import { createMemberReconciliationService } from '../services/memberReconciliationService.js';
 import { createMemberService } from '../services/memberService.js';
@@ -164,10 +165,24 @@ export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
     listGuildMembersWithRoles: (roleIds) => gateway.listMembersWithAnyRole(roleIds),
   });
 
+  // Import dei ruoli assegnati a mano dalla UI di Discord.
+  //
+  // Costruito SEMPRE, anche in REPORT_ONLY: le regole che decidono cosa sia
+  // importabile servono anche solo per descrivere una divergenza, e sia il cron
+  // sia `/system sync-check` le prendono da qui invece di tenerne una copia.
+  // A decidere se applicarle o soltanto raccontarle è `env.roleSyncMode`.
+  const roleImport = createDiscordRoleImportService({
+    repos,
+    roleRegistry: roles,
+    audit,
+    announcements: rankAnnouncements,
+  });
+
   const consistency = createConsistencyService({
     repos,
-    roles: roleService,
     roleRegistry: roles,
+    roleImport,
+    mode: env.roleSyncMode,
     listAllGuildMembers: () => gateway.listMembers(),
   });
 
@@ -180,11 +195,12 @@ export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
 
   const reconciliation = createMemberReconciliationService({
     repos,
-    roles: roleService,
     roleRegistry: roles,
     audit,
     blacklist,
     lifecycle,
+    roleImport,
+    mode: env.roleSyncMode,
     listAllGuildMembers: () => gateway.listMembers(),
     guildId: env.guildId,
   });
@@ -214,6 +230,7 @@ export function createWorkerContext(deps: WorkerContextDeps): WorkerContext {
     community,
     blacklist,
     consistency,
+    roleImport,
     stats,
     panels,
     reconciliation,

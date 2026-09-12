@@ -1,5 +1,4 @@
 import { SlashCommandBuilder } from '@discordjs/builders';
-import { PermissionFlagsBits } from 'discord-api-types/v10';
 import { buildControlPanel } from '../components/embeds/controlPanel.js';
 import { handleInteractionError } from '../errors/handleInteractionError.js';
 import type { SlashCommand } from '../types/command.js';
@@ -17,7 +16,15 @@ export const panelCommand: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName('panel')
     .setDescription('Control panel della Leadership')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    // NESSUN `setDefaultMemberPermissions`: l'autorizzazione di questo comando e'
+    // APPLICATIVA, non Discord.
+    //
+    // Un gate `ManageRoles`/`ManageGuild` qui sopra si frappone PRIMA della
+    // permission matrix e rende inutile assegnare OG o Big Homie: Discord
+    // rifiuterebbe l'interaction prima ancora che il bot la veda. Il comando
+    // resta quindi VISIBILE a tutti, ed e' l'handler a rifiutare server-side —
+    // cosa che fa a ogni singola interaction, bottoni e modal compresi, perche'
+    // chi ha aperto un pannello non dice nulla su chi ci sta cliccando adesso.
     .toJSON(),
 
   async execute(interaction, ctx): Promise<void> {

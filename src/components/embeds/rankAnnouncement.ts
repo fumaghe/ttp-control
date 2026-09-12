@@ -26,8 +26,14 @@ export type RankChangeDirection = 'PUT_ON' | 'PUT_OFF';
 
 export interface RankAnnouncementInput {
   readonly memberDiscordId: string;
-  /** Chi ha eseguito l'operazione. */
-  readonly actorDiscordId: string;
+  /**
+   * Chi ha eseguito l'operazione, oppure `null` se non e' conoscibile.
+   *
+   * `null` e' il caso della sincronizzazione automatica: l'elenco dei membri
+   * della guild dice CHE COSA e' cambiato, non CHI l'ha cambiato. Meglio dirlo
+   * che pubblicare una mention vuota o un `<@null>`.
+   */
+  readonly actorDiscordId: string | null;
   readonly fromRank: MemberRank;
   readonly toRank: MemberRank;
   readonly direction: RankChangeDirection;
@@ -84,7 +90,11 @@ export function buildRankAnnouncement(input: RankAnnouncementInput): MessagePayl
     )
     .addFields({
       name: style.actorField,
-      value: mention(input.actorDiscordId),
+      // Attore ignoto: si dichiara l'origine invece di fingere un autore.
+      value:
+        input.actorDiscordId === null
+          ? '_Modifica manuale su Discord_'
+          : mention(input.actorDiscordId),
       inline: true,
     });
 

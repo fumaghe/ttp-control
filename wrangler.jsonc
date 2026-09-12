@@ -49,6 +49,13 @@
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
 
+    // Sincronizzazione dei ruoli assegnati a mano dalla UI di Discord.
+    //   REPORT_ONLY  segnala e basta (comportamento storico)
+    //   IMPORT_SAFE  importa le transizioni costruttive e non ambigue
+    // Il rollback e' rimettere REPORT_ONLY e rifare `npm run worker:deploy`:
+    // nessuna migration da annullare, il database resta valido.
+    "ROLE_SYNC_MODE": "IMPORT_SAFE",
+
     // --- Identità dell'applicazione ---------------------------------------
     "CLIENT_ID": "1538909559081541693",
     "GUILD_ID": "1538885185029017682",
@@ -86,7 +93,7 @@
     "CHANNEL_AUDIT_LOG_ID": "1538934747676545054",
     "CHANNEL_BLACKLIST_ID": "1538893121084203008",
     "CHANNEL_CONTROL_PANEL_ID": "1538934817025167381",
-    "CHANNEL_PUT_ON_OFF_ID": "1538892833568595968", 
+    "CHANNEL_PUT_ON_OFF_ID": "1538892833568595968",
 
     // Messaggi automatici del ciclo di vita del membro (cron di
     // riconciliazione). Sostituire con gli ID reali dei due canali.

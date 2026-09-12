@@ -39,6 +39,7 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   [AuditAction.KICKED]: '👢 Espulso dal server',
   [AuditAction.BANNED]: '⛔ Bannato dal server',
   [AuditAction.ROLE_SYNC_WARNING]: '⚠️ Divergenza ruoli',
+  [AuditAction.ROLE_SYNC_BOOTSTRAP]: '📥 Adozione iniziale dei ruoli Discord',
   [AuditAction.MEMBER_JOINED_DISCORD]: '➡️ Entrato nel Discord',
   [AuditAction.MEMBER_LEFT_DISCORD]: '⬅️ Uscito dal Discord',
   [AuditAction.BLACKLISTED_USER_REJOINED]: '🚨 Utente in blacklist rilevato',

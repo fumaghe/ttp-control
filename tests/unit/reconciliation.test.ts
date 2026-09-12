@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AuditAction, MemberStatus } from '../../src/generated/prisma/enums.js';
+import type { RoleSyncMode } from '../../src/config/env.js';
 import type { ApiUser } from '../../src/discord/api.js';
 import type { MessagePayload } from '../../src/discord/payload.js';
 import {
@@ -74,15 +75,18 @@ function build(
   options: {
     listAllGuildMembers?: () => Promise<GuildMemberSnapshot[]>;
     lifecycle?: MemberLifecycleMessageService;
+    /** Default `REPORT_ONLY`: i test dell'import lo alzano esplicitamente. */
+    mode?: RoleSyncMode;
   } = {},
 ) {
   return createMemberReconciliationService({
     repos: harness.repos,
-    roles: harness.roleService,
     roleRegistry: harness.roles,
     audit: harness.audit,
     blacklist: harness.blacklist,
     lifecycle: options.lifecycle ?? createLifecycle(),
+    roleImport: harness.roleImport,
+    mode: options.mode ?? 'REPORT_ONLY',
     listAllGuildMembers: options.listAllGuildMembers ?? (() => Promise.resolve(snapshots())),
     guildId: GUILD_ID,
   });
@@ -279,8 +283,11 @@ describe('modifiche manuali dei ruoli (sostituisce guildMemberUpdate)', () => {
     const warning = harness.store.audit.find(
       (entry) => entry.action === AuditAction.ROLE_SYNC_WARNING,
     );
-    expect(warning?.reason).toContain('non ha più il ruolo TTP');
-    expect(warning?.metadata).toMatchObject({ autoCorrected: false });
+    // Il messaggio dice ENTRAMBE le cose: che il ruolo TTP è stato tolto a mano
+    // e che l'uscita dalla gang non viene dedotta da quel gesto.
+    expect(warning?.reason).toContain('il ruolo TTP è stato rimosso a mano');
+    expect(warning?.reason).toContain('NON viene dedotta');
+    expect(warning?.metadata).toMatchObject({ autoCorrected: false, importable: false });
 
     // Il ruolo NON è stato riassegnato: nessuna sincronizzazione distruttiva.
     expect(harness.guild.members.get(MEMBER)?.roles.has(ROLE_IDS.ttp)).toBe(false);
@@ -656,10 +663,10 @@ describe('failure policy dei messaggi di lifecycle', () => {
   it('senza lifecycle configurato la riconciliazione si comporta come prima', async () => {
     const bare = createMemberReconciliationService({
       repos: harness.repos,
-      roles: harness.roleService,
       roleRegistry: harness.roles,
       audit: harness.audit,
       blacklist: harness.blacklist,
+      roleImport: harness.roleImport,
       listAllGuildMembers: () => Promise.resolve(snapshots()),
       guildId: GUILD_ID,
     });
