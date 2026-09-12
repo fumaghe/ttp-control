@@ -54,7 +54,7 @@
     //   IMPORT_SAFE  importa le transizioni costruttive e non ambigue
     // Il rollback e' rimettere REPORT_ONLY e rifare `npm run worker:deploy`:
     // nessuna migration da annullare, il database resta valido.
-    "ROLE_SYNC_MODE": "IMPORT_SAFE",
+    "ROLE_SYNC_MODE": "REPORT_ONLY",
 
     // --- Identità dell'applicazione ---------------------------------------
     "CLIENT_ID": "1538909559081541693",
