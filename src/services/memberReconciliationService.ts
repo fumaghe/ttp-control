@@ -108,6 +108,18 @@ interface ImportTally {
   verificationsImported: number;
 }
 
+/**
+ * Numero massimo di membri per cui un singolo Cron Trigger applica scritture
+ * Discord -> database.
+ *
+ * Sul piano Cloudflare Workers Free un Cron Trigger dispone di 10 ms di CPU.
+ * Il piano di un singolo membro puo' contenere piu' scritture (verifica,
+ * membership e ruoli speciali), quindi il limite e' deliberatamente uno. Le
+ * divergenze rimanenti vengono riprese dai cron successivi anche quando lo
+ * snapshot Discord non e' cambiato.
+ */
+export const AUTO_IMPORT_MEMBER_BATCH_SIZE = 1;
+
 function emptyTally(): ImportTally {
   return {
     members: 0,
@@ -480,6 +492,26 @@ export function createMemberReconciliationService(
   }
 
   /**
+   * Recupera una divergenza importabile che non compare piu' come modifica
+   * dello snapshot (per esempio dopo un seed in REPORT_ONLY o dopo che un
+   * batch precedente ha esaurito il budget).
+   *
+   * Gli stati manuali/ambigui restano visibili in `/system sync-check`, ma non
+   * generano un nuovo audit a ogni cron. Solo un piano con azioni viene
+   * applicato. `bootstrap: true` sopprime Put On / Put Off per questo backlog:
+   * non conosciamo il momento reale in cui quei ruoli sono stati assegnati.
+   */
+  async function importActionableBacklog(
+    snapshot: GuildMemberSnapshot,
+  ): Promise<RoleChangeOutcome> {
+    const plan = await roleImport.planFor(snapshot);
+    if (plan.kind !== 'actions') return NO_CHANGE;
+
+    const outcome = await roleImport.importMember({ snapshot, bootstrap: true });
+    return handleImportOutcome(snapshot, outcome, [], []);
+  }
+
+  /**
    * Messaggi pubblici di benvenuto e addio.
    *
    * BEST-EFFORT, e in fondo alla riconciliazione di proposito: viene chiamata
@@ -552,35 +584,18 @@ export function createMemberReconciliationService(
     let warnings = 0;
     let blocked = 0;
     let failures = 0;
+    let importsRemaining = AUTO_IMPORT_MEMBER_BATCH_SIZE;
 
     const toPersist: Parameters<GuildMemberSnapshotRepository['upsertMany']>[0][number][] = [];
 
     for (const snapshot of current) {
-      if (mode === 'IMPORT_SAFE') {
+      if (mode === 'IMPORT_SAFE' && importsRemaining > 0) {
         try {
-          // `bootstrap: true`: audit solo a database (niente muro di messaggi
-          // nei canali Discord) e nessun annuncio pubblico.
-          const outcome = await roleImport.importMember({ snapshot, bootstrap: true });
-          switch (outcome.kind) {
-            case 'imported':
-              tallyChanges(tally, outcome.changes);
-              break;
-            case 'warning':
-              // Stato ambiguo: si conta e si lascia esattamente com'è.
-              // `/system sync-check` continuerà a mostrarlo finché un umano non
-              // decide. Nessun warning per membro nei canali: è un bootstrap.
-              warnings += 1;
-              break;
-            case 'blocked':
-              blocked += 1;
-              break;
-            case 'unchanged':
-              break;
-            default: {
-              const exhaustive: never = outcome;
-              throw new Error(`Esito di import sconosciuto: ${JSON.stringify(exhaustive)}`);
-            }
-          }
+          const result = await importActionableBacklog(snapshot);
+          if (result.warned) warnings += 1;
+          if (result.blocked) blocked += 1;
+          tallyChanges(tally, result.changes);
+          if (result.changes.length > 0) importsRemaining -= 1;
         } catch (error) {
           // Stessa regola del regime normale: snapshot non scritto, quindi il
           // prossimo cron tratterà questo membro come una modifica da valutare.
@@ -643,6 +658,8 @@ export function createMemberReconciliationService(
           reason: 'Adozione iniziale dei ruoli Discord già assegnati prima del deploy',
           metadata: {
             source: 'discord_bootstrap',
+            progressive: true,
+            maxMembersPerRun: AUTO_IMPORT_MEMBER_BATCH_SIZE,
             scanned: report.scanned,
             imports: report.imports,
             membersCreated: report.membersCreated,
@@ -696,6 +713,7 @@ export function createMemberReconciliationService(
       let blacklistedRejoins = 0;
       let failures = 0;
       const tally = emptyTally();
+      let importsRemaining = AUTO_IMPORT_MEMBER_BATCH_SIZE;
 
       const toPersist: Parameters<GuildMemberSnapshotRepository['upsertMany']>[0][number][] = [];
 
@@ -709,6 +727,7 @@ export function createMemberReconciliationService(
       for (const snapshot of current) {
         const previous = previousById.get(snapshot.discordId);
         const rolesHash = hashRoleIds(snapshot.roleIds);
+        let shouldPersistSnapshot = true;
 
         try {
           if (!previous?.inGuild) {
@@ -730,31 +749,51 @@ export function createMemberReconciliationService(
               // da quel momento non risulterebbero più "cambiati", quindi non
               // verrebbero importati mai più. Per chi non ha nessun ruolo
               // gestito il piano è vuoto e questa chiamata non fa nulla.
-              if (mode === 'IMPORT_SAFE') {
+              if (mode === 'IMPORT_SAFE' && importsRemaining > 0) {
                 const imported = await roleImport.importMember({ snapshot });
                 const result = await handleImportOutcome(snapshot, imported, [], []);
                 if (result.warned) warnings += 1;
                 if (result.blocked) blocked += 1;
                 tallyChanges(tally, result.changes);
+                if (result.changes.length > 0) importsRemaining -= 1;
               }
             }
           } else if (previous.rolesHash !== rolesHash) {
             roleChanges += 1;
-            const outcome = await handleRoleChange(snapshot, previous);
+            if (mode === 'IMPORT_SAFE' && importsRemaining === 0) {
+              // Non fotografare come completata una modifica che questo batch
+              // non ha potuto valutare: il prossimo cron deve rivederla come
+              // vero role change (e mantenere l'eventuale annuncio).
+              shouldPersistSnapshot = false;
+            } else {
+              const outcome = await handleRoleChange(snapshot, previous);
+              if (outcome.warned) warnings += 1;
+              if (outcome.blocked) blocked += 1;
+              tallyChanges(tally, outcome.changes);
+              if (outcome.changes.length > 0) importsRemaining -= 1;
+            }
+          } else if (mode === 'IMPORT_SAFE' && importsRemaining > 0) {
+            // Lo snapshot puo' essere allineato mentre il database non lo e':
+            // succede dopo REPORT_ONLY e nei bootstrap interrotti. Il piano
+            // condiviso con sync-check rende il recupero convergente.
+            const outcome = await importActionableBacklog(snapshot);
             if (outcome.warned) warnings += 1;
             if (outcome.blocked) blocked += 1;
             tallyChanges(tally, outcome.changes);
+            if (outcome.changes.length > 0) importsRemaining -= 1;
           }
 
-          toPersist.push({
-            guildId,
-            discordId: snapshot.discordId,
-            inGuild: true,
-            roleIds: [...snapshot.roleIds],
-            rolesHash,
-            nickname: snapshot.displayName,
-            seenAt: now,
-          });
+          if (shouldPersistSnapshot) {
+            toPersist.push({
+              guildId,
+              discordId: snapshot.discordId,
+              inGuild: true,
+              roleIds: [...snapshot.roleIds],
+              rolesHash,
+              nickname: snapshot.displayName,
+              seenAt: now,
+            });
+          }
         } catch (error) {
           // Snapshot NON aggiornato: la prossima esecuzione riprova. È il
           // motivo per cui una failure del cron non corrompe lo stato.

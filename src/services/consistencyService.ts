@@ -246,7 +246,7 @@ export function createConsistencyService(deps: {
                 displayName,
                 describeRoleImportAction(action),
                 mode === 'IMPORT_SAFE'
-                  ? 'Nessun intervento necessario: il prossimo cron la importa da solo.'
+                  ? 'Nessun intervento necessario: i prossimi cron la importeranno progressivamente.'
                   : suggestionForAction(action),
                 true,
               );

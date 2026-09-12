@@ -812,11 +812,16 @@ calcolare un diff.
 
 Tre proprietà che rendono il cron sicuro da ripetere:
 
-1. **Seed silenzioso.** Alla prima esecuzione su una guild senza snapshot lo
+1. **Seed silenzioso e progressivo.** Alla prima esecuzione su una guild senza snapshot lo
    stato viene fotografato *senza* emettere eventi di join — altrimenti il
    primo cron inonderebbe l'audit con un `MEMBER_JOINED_DISCORD` per ogni
    membro già presente. In `IMPORT_SAFE` i ruoli già assegnati vengono comunque
-   adottati, ma in silenzio.
+   adottati, ma in silenzio e al massimo un membro per cron. Lo stesso recupero
+   progressivo rivaluta gli snapshot già esistenti, quindi un precedente seed
+   in `REPORT_ONLY` o un bootstrap interrotto non può lasciare divergenze ferme
+   per sempre. Il batch ridotto mantiene ogni esecuzione entro il budget di
+   [10 ms di CPU per Cron Trigger del piano Cloudflare Workers
+   Free](https://developers.cloudflare.com/workers/platform/limits/#cpu-time).
 2. **Isolamento degli errori.** Ogni membro è indipendente: se il suo
    trattamento fallisce, il suo snapshot **non** viene aggiornato e la
    prossima esecuzione riprova. Uno stato avanzato per qualcosa che non è
