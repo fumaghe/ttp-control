@@ -804,11 +804,12 @@ calcolare un diff.
 
 Alla fine di ogni esecuzione il cron pubblica o aggiorna un unico pannello nel
 canale `CHANNEL_HIERARCHY_ID`: mostra i nove rank dall'alto verso il basso e,
-sotto ciascuno, le mention dei membri presenti nel roster. Le mention sono
-silenziose, i membri inattivi sono marcati con 💤 e i record `LEFT` o
-`PERMADEATH` non compaiono. L'ID del messaggio vive in `PersistentPanel`, quindi
-un redeploy non crea duplicati; se il messaggio viene cancellato, il cron
-successivo lo ricrea.
+sotto ciascuno, le mention di chi possiede davvero quel ruolo su Discord. Usa
+gli snapshot con `inGuild=true`, quindi chi ha lasciato il server non compare
+anche se conserva un vecchio record `Member` nel database. Ruoli e membri sono
+mention reali ma silenziose; chi possiede il ruolo Inactive è marcato con 💤.
+L'ID del messaggio vive in `PersistentPanel`, quindi un redeploy non crea
+duplicati; se il messaggio viene cancellato, il cron successivo lo ricrea.
 
 **Le regole di dominio sono identiche alla V1:**
 

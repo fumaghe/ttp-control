@@ -18,7 +18,7 @@ import {
   InteractionType,
   type APIInteraction,
 } from 'discord-api-types/v10';
-import { PanelType, MemberStatus } from '../generated/prisma/enums.js';
+import { PanelType } from '../generated/prisma/enums.js';
 import { buildHierarchyPanel } from '../components/embeds/hierarchyPanel.js';
 import { buildEnv, EnvironmentError, type Env } from '../config/env.js';
 import { createDatabase, disconnectDatabase } from '../database/prisma.js';
@@ -235,20 +235,18 @@ export default {
       // riconciliazione. Un canale senza permessi non deve annullare gli
       // import già riusciti né impedire al cron di completarsi.
       try {
-        const members = await app.members.roster({
-          statusIn: [MemberStatus.ACTIVE, MemberStatus.INACTIVE],
-        });
+        const snapshots = await app.repos.snapshots.listForGuild(app.guildId);
         const panel = await app.panels.publish({
           panelType: PanelType.HIERARCHY,
           channelId: app.channels.hierarchy,
-          payload: buildHierarchyPanel(members, app.roles),
+          payload: buildHierarchyPanel(snapshots, app.roles),
         });
         log.info(
           {
             channelId: app.channels.hierarchy,
             messageId: panel.messageId,
             action: panel.action,
-            members: members.length,
+            membersInGuild: snapshots.filter((snapshot) => snapshot.inGuild).length,
           },
           'Pannello gerarchia sincronizzato',
         );

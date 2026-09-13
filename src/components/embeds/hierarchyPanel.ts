@@ -1,80 +1,99 @@
 /**
- * Pannello pubblico della gerarchia TTP.
+ * Pannello pubblico della gerarchia Grape.
  *
- * È un solo messaggio persistente: il cron lo modifica ogni cinque minuti
- * invece di pubblicarne uno nuovo. I membri provengono dal roster a database,
- * quindi il pannello segue lo stesso stato mostrato dal Management System.
+ * È contenuto testuale, non un embed: Discord non risolve le mention dei ruoli
+ * nei titoli dei field di un embed. Nel contenuto normale `<@&id>` diventa il
+ * vero tag del ruolo; `allowed_mentions` resta vuoto nel gateway, quindi né
+ * ruoli né membri ricevono una notifica.
  */
-import { MemberStatus } from '../../generated/prisma/enums.js';
 import { RANK_ORDER } from '../../config/constants.js';
 import type { RoleRegistry } from '../../config/roles.js';
 import type { MessagePayload } from '../../discord/payload.js';
-import type { Member } from '../../repositories/types.js';
-import { brandEmbed } from './base.js';
+import type { GuildMemberSnapshotRow } from '../../repositories/types.js';
 
-/**
- * Nove field da 600 caratteri restano sotto il limite totale di 6000
- * caratteri imposto da Discord, inclusi titolo, descrizione e footer.
- */
-const MAX_MEMBERS_FIELD_LENGTH = 600;
+const MESSAGE_CONTENT_LIMIT = 2000;
 
-function memberLabel(member: Member): string {
-  const inactive = member.status === MemberStatus.INACTIVE ? ' 💤' : '';
-  return `• <@${member.discordId}>${inactive}`;
+interface RankedMember {
+  readonly discordId: string;
+  readonly nickname: string | null;
+  readonly inactive: boolean;
 }
 
-/** Tronca esplicitamente un gruppo molto grande, senza spezzare una mention. */
-function memberList(members: readonly Member[]): string {
-  if (members.length === 0) return '_Nessun membro_';
+interface RankGroup {
+  readonly roleId: string;
+  readonly members: readonly RankedMember[];
+}
 
-  const lines: string[] = [];
-  for (let index = 0; index < members.length; index += 1) {
-    const member = members[index];
-    if (!member) break;
-    const line = memberLabel(member);
-    const remaining = members.length - index - 1;
-    const suffix = remaining > 0 ? `\n…e altri ${remaining}` : '';
-    const candidate = [...lines, line].join('\n');
+function render(groups: readonly RankGroup[], visibleCounts: readonly number[]): string {
+  const lines = ['## 🏛️ GERARCHIA GRAPE'];
 
-    if (`${candidate}${suffix}`.length > MAX_MEMBERS_FIELD_LENGTH) {
-      lines.push(`…e altri ${members.length - index}`);
-      break;
+  groups.forEach((group, index) => {
+    const visibleCount = visibleCounts[index] ?? 0;
+    const visible = group.members.slice(0, visibleCount);
+    const omitted = group.members.length - visible.length;
+
+    lines.push('', `**<@&${group.roleId}> · ${group.members.length}**`);
+    if (group.members.length === 0) {
+      lines.push('_Nessun membro_');
+      return;
     }
-    lines.push(line);
-  }
 
+    for (const member of visible) {
+      lines.push(`• <@${member.discordId}>${member.inactive ? ' 💤' : ''}`);
+    }
+    if (omitted > 0) lines.push(`…e altri ${omitted}`);
+  });
+
+  const uniqueMembers = new Set(groups.flatMap((group) => group.members.map((m) => m.discordId)));
+  lines.push('', `**${uniqueMembers.size} membri Grape** · 💤 = inattivo`);
   return lines.join('\n');
 }
 
+/**
+ * Costruisce un pannello dai ruoli realmente osservati su Discord.
+ *
+ * Le righe `inGuild=false` restano nello storico degli snapshot per rilevare
+ * eventuali rientri, ma non devono comparire nel pannello. Un membro con due
+ * rank Discord compare in entrambi: il pannello fotografa i ruoli effettivi e
+ * `/system sync-check` continua a segnalare l'ambiguità.
+ */
 export function buildHierarchyPanel(
-  members: readonly Member[],
+  snapshots: readonly GuildMemberSnapshotRow[],
   roles: RoleRegistry,
 ): MessagePayload {
-  const current = members.filter(
-    (member) => member.status === MemberStatus.ACTIVE || member.status === MemberStatus.INACTIVE,
-  );
+  const current = snapshots.filter((snapshot) => snapshot.inGuild);
+  const groups: RankGroup[] = [...RANK_ORDER].reverse().map((rank) => ({
+    roleId: roles.rank[rank],
+    members: current
+      .filter((snapshot) => snapshot.roleIds.includes(roles.rank[rank]))
+      .map((snapshot): RankedMember => ({
+        discordId: snapshot.discordId,
+        nickname: snapshot.nickname ?? null,
+        inactive: snapshot.roleIds.includes(roles.inactive),
+      }))
+      .sort((left, right) =>
+        (left.nickname ?? left.discordId).localeCompare(right.nickname ?? right.discordId, 'it'),
+      ),
+  }));
 
-  const embed = brandEmbed('🏛️ GERARCHIA TTP')
-    .setDescription(
-      'Membri raggruppati per ruolo gerarchico. Il pannello si aggiorna automaticamente ogni 5 minuti.',
-    )
-    .setFooter({ text: `${current.length} membri TTP · 💤 = inattivo` });
-
-  for (const rank of [...RANK_ORDER].reverse()) {
-    const group = current
-      .filter((member) => member.rank === rank)
-      .sort((left, right) => {
-        const leftName = [left.rpName, left.rpSurname].filter(Boolean).join(' ');
-        const rightName = [right.rpName, right.rpSurname].filter(Boolean).join(' ');
-        return (leftName || left.discordId).localeCompare(rightName || right.discordId, 'it');
-      });
-
-    embed.addFields({
-      name: `<@&${roles.rank[rank]}> · ${group.length}`,
-      value: memberList(group),
-      inline: false,
-    });
+  // Mantiene sempre tutti i rank e tronca solo i membri se la guild cresce
+  // oltre il limite Discord, senza spezzare mention o produrre JSON invalido.
+  const visibleCounts = groups.map((group) => group.members.length);
+  let content = render(groups, visibleCounts);
+  while (content.length > MESSAGE_CONTENT_LIMIT) {
+    let largestGroup = -1;
+    for (let index = 0; index < visibleCounts.length; index += 1) {
+      if (
+        (visibleCounts[index] ?? 0) > 0 &&
+        (largestGroup === -1 || (visibleCounts[index] ?? 0) > (visibleCounts[largestGroup] ?? 0))
+      ) {
+        largestGroup = index;
+      }
+    }
+    if (largestGroup === -1) break;
+    visibleCounts[largestGroup] = (visibleCounts[largestGroup] ?? 1) - 1;
+    content = render(groups, visibleCounts);
   }
 
-  return { embeds: [embed] };
+  return { content };
 }
