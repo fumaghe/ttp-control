@@ -6,7 +6,7 @@
  * sarà il cron ad applicarla, non questo comando.
  *
  * Le voci sono separate in due gruppi, che è la distinzione che conta davvero
- * per chi legge: quelle che si sistemano da sole al prossimo cron e quelle che
+ * per chi legge: quelle che si sistemano progressivamente nei prossimi cron e quelle che
  * richiedono una decisione umana — una motivazione, un autore, la volontà di
  * far uscire davvero qualcuno dalla gang. Sono cose che un ruolo Discord non
  * porta con sé, e nessuna automazione può inventarle.
@@ -95,7 +95,7 @@ export const systemCommand: SlashCommand = {
             `⚙️ \`ROLE_SYNC_MODE\` = **${report.mode}**`,
             importable.length > 0
               ? autoImport
-                ? `📥 **${importable.length}** verranno importate dal prossimo cron (max 5 minuti): nessun intervento necessario.`
+                ? `📥 **${importable.length}** verranno importate progressivamente dai prossimi cron (fino a 1 membro ogni 5 minuti): nessun intervento necessario.`
                 : `📥 **${importable.length}** sarebbero importabili automaticamente, ma la modalità è REPORT_ONLY: vanno applicate a mano.`
               : '',
             manual.length > 0

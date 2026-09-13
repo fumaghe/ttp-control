@@ -670,6 +670,39 @@ describe('operazioni distruttive restano comando-only', () => {
 // Idempotenza e assenza di loop fra comandi e cron
 // =============================================================================
 
+describe('batch compatibile con Cloudflare Workers Free', () => {
+  it('importa al massimo un membro e riprende il successivo senza perdere il role change', async () => {
+    await createMemberViaCommand(MemberRank.RESIDENT);
+    addFakeMember(h.guild, OTHER, { position: 1 });
+    await verifyUser(h, OTHER);
+    await h.members.addToGang({
+      discordId: OTHER,
+      actorDiscordId: OG,
+      rank: MemberRank.RESIDENT,
+      reason: 'ingresso',
+      source: 'manual',
+    });
+    await cron.run();
+
+    roles(MEMBER).delete(ROLE_IDS.resident);
+    roles(MEMBER).add(ROLE_IDS.loc);
+    roles(OTHER).delete(ROLE_IDS.resident);
+    roles(OTHER).add(ROLE_IDS.loc);
+
+    const first = await cron.run();
+    expect(first.ranksUpdated).toBe(1);
+    expect((await h.repos.members.findByDiscordId(MEMBER))?.rank).toBe(MemberRank.LOC);
+    expect((await h.repos.members.findByDiscordId(OTHER))?.rank).toBe(MemberRank.RESIDENT);
+
+    const second = await cron.run();
+    expect(second.ranksUpdated).toBe(1);
+    expect((await h.repos.members.findByDiscordId(OTHER))?.rank).toBe(MemberRank.LOC);
+
+    const third = await cron.run();
+    expect(third.imports).toBe(0);
+  });
+});
+
 describe('idempotenza', () => {
   it('una seconda esecuzione non riapplica nulla', async () => {
     await createMemberViaCommand(MemberRank.TINY_LOC);
@@ -753,10 +786,16 @@ describe('bootstrap iniziale', () => {
   });
 
   it('importa i ruoli già assegnati', async () => {
-    const report = await cron.run();
+    const first = await cron.run();
+    const second = await cron.run();
 
-    expect(report.seeded).toBe(true);
-    expect(report.membersCreated).toBe(1);
+    expect(first.seeded).toBe(true);
+    expect(first.membersCreated).toBe(1);
+    // Il piano Free applica al massimo un membro per invocazione: la verifica
+    // autonoma di OTHER viene recuperata dal cron successivo anche se lo
+    // snapshot Discord non è cambiato.
+    expect(second.seeded).toBe(false);
+    expect(second.verificationsImported).toBe(1);
 
     const dbMember = await h.repos.members.findByDiscordId(MEMBER);
     expect(dbMember?.rank).toBe(MemberRank.LOC);
@@ -789,10 +828,15 @@ describe('bootstrap iniziale', () => {
       roles: [ROLE_IDS.ttp, ROLE_IDS.resident], // TTP senza Verified
     });
 
-    const report = await cron.run();
+    await cron.run();
 
-    expect(report.warnings).toBeGreaterThan(0);
     expect(await h.repos.members.findByDiscordId('400000000000000003')).toBeNull();
+    expect(
+      (await h.consistency.run()).issues.some(
+        (issue) =>
+          issue.discordId === '400000000000000003' && issue.kind === 'TTP_WITHOUT_VERIFIED',
+      ),
+    ).toBe(true);
   });
 
   it('funziona su una guild mista, con alcuni record già presenti', async () => {
@@ -821,15 +865,33 @@ describe('bootstrap iniziale', () => {
     expect(await h.repos.members.findByDiscordId(MEMBER)).toBeNull();
   });
 
-  it('il cron successivo non ritratta ciò che il bootstrap ha già importato', async () => {
+  it('completa il backlog a blocchi e poi non ritratta ciò che ha importato', async () => {
     await cron.run();
     const historyAfterBootstrap = h.store.history.length;
 
     const second = await cron.run();
+    const historyAfterSecondBatch = h.store.history.length;
+    const third = await cron.run();
 
-    expect(second.imports).toBe(0);
+    expect(second.imports).toBe(1);
     expect(second.warnings).toBe(0);
-    expect(h.store.history.length).toBe(historyAfterBootstrap);
+    expect(h.store.history.length).toBeGreaterThanOrEqual(historyAfterBootstrap);
+    expect(third.imports).toBe(0);
+    expect(third.warnings).toBe(0);
+    expect(h.store.history.length).toBe(historyAfterSecondBatch);
+  });
+
+  it('recupera gli snapshot fotografati in REPORT_ONLY senza richiedere un nuovo ruolo', async () => {
+    const reportOnly = build('REPORT_ONLY');
+    await reportOnly.run();
+
+    expect(await h.repos.members.findByDiscordId(MEMBER)).toBeNull();
+
+    const importSafe = build('IMPORT_SAFE');
+    const recovered = await importSafe.run();
+
+    expect(recovered.membersCreated).toBe(1);
+    expect((await h.repos.members.findByDiscordId(MEMBER))?.rank).toBe(MemberRank.LOC);
   });
 });
 
