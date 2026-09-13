@@ -18,6 +18,8 @@ import {
   InteractionType,
   type APIInteraction,
 } from 'discord-api-types/v10';
+import { PanelType, MemberStatus } from '../generated/prisma/enums.js';
+import { buildHierarchyPanel } from '../components/embeds/hierarchyPanel.js';
 import { buildEnv, EnvironmentError, type Env } from '../config/env.js';
 import { createDatabase, disconnectDatabase } from '../database/prisma.js';
 import { createDiscordRest } from '../discord/rest.js';
@@ -228,6 +230,35 @@ export default {
     try {
       const { app } = createWorkerContext({ env, db });
       const report = await app.reconciliation.run();
+
+      // Pannello pubblico della gerarchia: best-effort e separato dalla
+      // riconciliazione. Un canale senza permessi non deve annullare gli
+      // import già riusciti né impedire al cron di completarsi.
+      try {
+        const members = await app.members.roster({
+          statusIn: [MemberStatus.ACTIVE, MemberStatus.INACTIVE],
+        });
+        const panel = await app.panels.publish({
+          panelType: PanelType.HIERARCHY,
+          channelId: app.channels.hierarchy,
+          payload: buildHierarchyPanel(members, app.roles),
+        });
+        log.info(
+          {
+            channelId: app.channels.hierarchy,
+            messageId: panel.messageId,
+            action: panel.action,
+            members: members.length,
+          },
+          'Pannello gerarchia sincronizzato',
+        );
+      } catch (error) {
+        log.error(
+          { err: error, channelId: app.channels.hierarchy },
+          'Pannello gerarchia non aggiornato',
+        );
+      }
+
       log.info(
         { cron: event.cron, hyperdrive: usesHyperdrive(bindings), ...report },
         'Cron completato',

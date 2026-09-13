@@ -145,6 +145,7 @@ enum AuditAction {
 enum PanelType {
   VERIFY
   CONTROL_PANEL
+  HIERARCHY
 }
 
 // =============================================================================

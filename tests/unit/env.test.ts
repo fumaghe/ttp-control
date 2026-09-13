@@ -56,6 +56,7 @@ function completeEnv(overrides: Record<string, string | undefined> = {}): NodeJS
     CHANNEL_AUDIT_LOG_ID: '300000000000000005',
     CHANNEL_BLACKLIST_ID: '300000000000000006',
     CHANNEL_CONTROL_PANEL_ID: '300000000000000007',
+    CHANNEL_HIERARCHY_ID: '300000000000000011',
     CHANNEL_WELCOME_ID: '300000000000000008',
     CHANNEL_GOODBYE_ID: '300000000000000009',
     CHANNEL_PUT_ON_OFF_ID: '300000000000000010',
@@ -80,6 +81,7 @@ describe('configurazione valida', () => {
     expect(env.roles.verified).toBe('200000000000000001');
     expect(env.roles.ttp).toBe('200000000000000002');
     expect(env.channels.verify).toBe('300000000000000001');
+    expect(env.channels.hierarchy).toBe('300000000000000011');
   });
 
   it('normalizza la public key in minuscolo', () => {
@@ -140,6 +142,19 @@ describe('canali di benvenuto e addio', () => {
     expect(keys).toContain('welcome');
     expect(keys).toContain('goodbye');
     expect(channels.all.filter((d) => d.key === 'welcome' || d.key === 'goodbye')).toHaveLength(2);
+  });
+});
+
+describe('canale del pannello gerarchia', () => {
+  it('è obbligatorio e viene controllato da `/setup check`', () => {
+    expect(() => loadEnv(completeEnv({ CHANNEL_HIERARCHY_ID: undefined }))).toThrow(
+      EnvironmentError,
+    );
+    resetEnvCache();
+
+    const channels = buildChannelRegistry(loadEnv(completeEnv()));
+    expect(channels.hierarchy).toBe('300000000000000011');
+    expect(channels.all.map((descriptor) => descriptor.key)).toContain('hierarchy');
   });
 });
 
