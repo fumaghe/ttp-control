@@ -23,7 +23,6 @@ const RANK_ROLE_KEY: Readonly<Record<MemberRank, string>> = {
   [MemberRank.TINY_LOC]: 'tinyLoc',
   [MemberRank.LOC]: 'loc',
   [MemberRank.ORIGINAL_TINY_LOC]: 'originalTinyLoc',
-  [MemberRank.BIG]: 'big',
   [MemberRank.BIG_HOMIE]: 'bigHomie',
   [MemberRank.OG]: 'og',
 };
@@ -81,7 +80,6 @@ export function buildRoleRegistry(env: Env): RoleRegistry {
     [MemberRank.TINY_LOC]: r.tinyLoc,
     [MemberRank.LOC]: r.loc,
     [MemberRank.ORIGINAL_TINY_LOC]: r.originalTinyLoc,
-    [MemberRank.BIG]: r.big,
     [MemberRank.BIG_HOMIE]: r.bigHomie,
     [MemberRank.OG]: r.og,
   };

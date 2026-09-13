@@ -70,12 +70,12 @@ describe('direzione del cambio di rank', () => {
     expect(directionOf(MemberRank.BIG_HOMIE, MemberRank.OG)).toBe('PUT_ON');
     expect(directionOf(MemberRank.OG, MemberRank.BIG_HOMIE)).toBe('PUT_OFF');
     expect(directionOf(MemberRank.LOC, MemberRank.TINY_LOC)).toBe('PUT_OFF');
-    expect(directionOf(MemberRank.BIG, MemberRank.BIG)).toBeNull();
+    expect(directionOf(MemberRank.LOC, MemberRank.LOC)).toBeNull();
   });
 
   it('usa la gerarchia, non l’ordine alfabetico', () => {
-    // Alfabeticamente 'BIG' < 'BIG_HOMIE' ma anche 'LOC' < 'TINY_LOC', che
-    // nella gerarchia è il contrario: un confronto fra stringhe scambierebbe
+    // Alfabeticamente 'LOC' < 'TINY_LOC', ma nella gerarchia è il contrario:
+    // un confronto fra stringhe scambierebbe
     // Put On e Put Off proprio su questa coppia.
     expect(directionOf(MemberRank.TINY_LOC, MemberRank.LOC)).toBe('PUT_ON');
     expect(directionOf(MemberRank.LOC, MemberRank.TINY_LOC)).toBe('PUT_OFF');
@@ -352,7 +352,7 @@ describe('embed Put On / Put Off', () => {
     const payload = buildRankAnnouncement({
       memberDiscordId: USER,
       actorDiscordId: OG,
-      fromRank: MemberRank.BIG,
+      fromRank: MemberRank.ORIGINAL_TINY_LOC,
       toRank: MemberRank.BIG_HOMIE,
       direction: 'PUT_ON',
     });

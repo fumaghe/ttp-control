@@ -133,7 +133,6 @@ describe('bottoni sopravvissuti al redeploy', () => {
         TINY_LOC: 1,
         LOC: 0,
         ORIGINAL_TINY_LOC: 1,
-        BIG: 0,
         BIG_HOMIE: 0,
         OG: 0,
       },

@@ -24,13 +24,12 @@ const EXPECTED_ORDER = [
   'TINY_LOC',
   'LOC',
   'ORIGINAL_TINY_LOC',
-  'BIG',
   'BIG_HOMIE',
   'OG',
 ] as const;
 
 describe('gerarchia TTP', () => {
-  it('espone i nove rank nell’ordine RESIDENT → OG', () => {
+  it('espone gli otto rank nell’ordine RESIDENT → OG', () => {
     expect([...RANK_ORDER]).toEqual([...EXPECTED_ORDER]);
   });
 
@@ -66,7 +65,6 @@ describe('gerarchia TTP', () => {
     expect(RANK_LABEL[MemberRank.TINY_LOC]).toContain('Tiny Loc');
     expect(RANK_LABEL[MemberRank.LOC]).toContain('Loc');
     expect(RANK_LABEL[MemberRank.ORIGINAL_TINY_LOC]).toContain('Original Tiny Loc');
-    expect(RANK_LABEL[MemberRank.BIG]).toContain('Big');
     expect(RANK_LABEL[MemberRank.BIG_HOMIE]).toContain('Big Homie');
     expect(RANK_LABEL[MemberRank.OG]).toContain('OG');
   });
@@ -85,8 +83,7 @@ describe('nextRank', () => {
     expect(nextRank(MemberRank.INFANTIL_LOC)).toBe(MemberRank.TINY_LOC);
     expect(nextRank(MemberRank.TINY_LOC)).toBe(MemberRank.LOC);
     expect(nextRank(MemberRank.LOC)).toBe(MemberRank.ORIGINAL_TINY_LOC);
-    expect(nextRank(MemberRank.ORIGINAL_TINY_LOC)).toBe(MemberRank.BIG);
-    expect(nextRank(MemberRank.BIG)).toBe(MemberRank.BIG_HOMIE);
+    expect(nextRank(MemberRank.ORIGINAL_TINY_LOC)).toBe(MemberRank.BIG_HOMIE);
     expect(nextRank(MemberRank.BIG_HOMIE)).toBe(MemberRank.OG);
   });
 
@@ -94,7 +91,7 @@ describe('nextRank', () => {
     expect(nextRank(MemberRank.OG)).toBeUndefined();
   });
 
-  it('serve otto promote per andare da RESIDENT a OG', () => {
+  it('servono sette promote per andare da RESIDENT a OG', () => {
     let rank: MemberRank = MemberRank.RESIDENT;
     let steps = 0;
     for (let next = nextRank(rank); next !== undefined; next = nextRank(rank)) {
@@ -102,15 +99,14 @@ describe('nextRank', () => {
       steps += 1;
     }
     expect(rank).toBe(MemberRank.OG);
-    expect(steps).toBe(8);
+    expect(steps).toBe(7);
   });
 });
 
 describe('previousRank', () => {
   it('retrocede di una posizione alla volta lungo tutta la scala', () => {
     expect(previousRank(MemberRank.OG)).toBe(MemberRank.BIG_HOMIE);
-    expect(previousRank(MemberRank.BIG_HOMIE)).toBe(MemberRank.BIG);
-    expect(previousRank(MemberRank.BIG)).toBe(MemberRank.ORIGINAL_TINY_LOC);
+    expect(previousRank(MemberRank.BIG_HOMIE)).toBe(MemberRank.ORIGINAL_TINY_LOC);
     expect(previousRank(MemberRank.ORIGINAL_TINY_LOC)).toBe(MemberRank.LOC);
     expect(previousRank(MemberRank.LOC)).toBe(MemberRank.TINY_LOC);
     expect(previousRank(MemberRank.TINY_LOC)).toBe(MemberRank.INFANTIL_LOC);
@@ -135,14 +131,14 @@ describe('previousRank', () => {
 describe('compareRanks', () => {
   it('ordina secondo la gerarchia', () => {
     expect(compareRanks(MemberRank.OG, MemberRank.BIG_HOMIE)).toBeGreaterThan(0);
-    expect(compareRanks(MemberRank.BIG_HOMIE, MemberRank.BIG)).toBeGreaterThan(0);
+    expect(compareRanks(MemberRank.BIG_HOMIE, MemberRank.ORIGINAL_TINY_LOC)).toBeGreaterThan(0);
     expect(compareRanks(MemberRank.RESIDENT, MemberRank.GANG_BANGER)).toBeLessThan(0);
-    expect(compareRanks(MemberRank.BIG, MemberRank.BIG)).toBe(0);
+    expect(compareRanks(MemberRank.LOC, MemberRank.LOC)).toBe(0);
   });
 
   it('non si fa ingannare dall’ordine alfabetico', () => {
-    // In ordine alfabetico 'BIG' < 'BIG_HOMIE' e 'LOC' < 'TINY_LOC': la
-    // seconda è l'opposto della gerarchia. Ecco perché nel codice non si
+    // In ordine alfabetico 'LOC' < 'TINY_LOC', l'opposto della gerarchia.
+    // Ecco perché nel codice non si
     // confrontano mai i rank come stringhe.
     expect(compareRanks(MemberRank.LOC, MemberRank.TINY_LOC)).toBeGreaterThan(0);
     // …mentre in ordine alfabetico è l'opposto:
@@ -155,7 +151,7 @@ describe('compareRanks', () => {
   it('è coerente con rankIndex su tutta la scala', () => {
     expect(rankIndex(MemberRank.RESIDENT)).toBe(0);
     expect(rankIndex(MemberRank.OG)).toBe(RANK_ORDER.length - 1);
-    expect(RANK_ORDER.length).toBe(9);
+    expect(RANK_ORDER.length).toBe(8);
 
     RANK_ORDER.forEach((rank, index) => {
       expect(rankIndex(rank)).toBe(index);

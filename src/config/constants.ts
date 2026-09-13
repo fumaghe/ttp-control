@@ -27,7 +27,6 @@ export const RANK_ORDER = [
   MemberRank.TINY_LOC,
   MemberRank.LOC,
   MemberRank.ORIGINAL_TINY_LOC,
-  MemberRank.BIG,
   MemberRank.BIG_HOMIE,
   MemberRank.OG,
 ] as const;
@@ -43,7 +42,6 @@ export const RANK_LABEL: Readonly<Record<MemberRank, string>> = {
   [MemberRank.TINY_LOC]: '🏷️ Tiny Loc',
   [MemberRank.LOC]: '🧢 Loc',
   [MemberRank.ORIGINAL_TINY_LOC]: '🥷 Original Tiny Loc',
-  [MemberRank.BIG]: '🔥 Big',
   [MemberRank.BIG_HOMIE]: '💎 Big Homie',
   [MemberRank.OG]: '👑 OG',
 };

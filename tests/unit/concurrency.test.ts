@@ -19,7 +19,7 @@ import {
 const USER = '900000000000000001';
 const OG = '900000000000000010';
 
-/** Tutti e nove i ruoli della gerarchia. */
+/** Tutti gli otto ruoli della gerarchia. */
 const ALL_RANK_ROLE_IDS = [
   ROLE_IDS.resident,
   ROLE_IDS.gangBanger,
@@ -27,7 +27,6 @@ const ALL_RANK_ROLE_IDS = [
   ROLE_IDS.tinyLoc,
   ROLE_IDS.loc,
   ROLE_IDS.originalTinyLoc,
-  ROLE_IDS.big,
   ROLE_IDS.bigHomie,
   ROLE_IDS.og,
 ];
