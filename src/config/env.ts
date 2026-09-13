@@ -254,6 +254,8 @@ function build(source: EnvSource) {
       auditLog: read.snowflake('CHANNEL_AUDIT_LOG_ID'),
       blacklist: read.snowflake('CHANNEL_BLACKLIST_ID'),
       controlPanel: read.snowflake('CHANNEL_CONTROL_PANEL_ID'),
+      /** Pannello pubblico con rank e membri, aggiornato dal cron. */
+      hierarchy: read.snowflake('CHANNEL_HIERARCHY_ID'),
       /** Annunci pubblici Put On / Put Off (cambi di rank di un membro TTP). */
       putOnOff: read.snowflake('CHANNEL_PUT_ON_OFF_ID'),
       /** Messaggi automatici di benvenuto (riconciliazione: nuovo membro). */

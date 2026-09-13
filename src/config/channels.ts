@@ -25,6 +25,8 @@ export interface ChannelRegistry {
   readonly auditLog: string;
   readonly blacklist: string;
   readonly controlPanel: string;
+  /** Pannello pubblico con la gerarchia e i membri di ogni rank. */
+  readonly hierarchy: string;
   /**
    * Annunci pubblici Put On / Put Off: il canale in cui la gang vede salire e
    * scendere i propri membri. Riguarda SOLO i cambi di rank di chi e' gia'
@@ -59,6 +61,7 @@ export function buildChannelRegistry(env: Env): ChannelRegistry {
     { key: 'auditLog', id: c.auditLog, label: 'Audit Log', requiresSend: true },
     { key: 'blacklist', id: c.blacklist, label: 'Blacklist', requiresSend: true },
     { key: 'controlPanel', id: c.controlPanel, label: 'Control Panel', requiresSend: true },
+    { key: 'hierarchy', id: c.hierarchy, label: 'Hierarchy Panel', requiresSend: true },
     { key: 'putOnOff', id: c.putOnOff, label: 'Put On / Put Off', requiresSend: true },
     { key: 'welcome', id: c.welcome, label: 'Welcome Channel', requiresSend: true },
     { key: 'goodbye', id: c.goodbye, label: 'Goodbye Channel', requiresSend: true },
@@ -72,6 +75,7 @@ export function buildChannelRegistry(env: Env): ChannelRegistry {
     auditLog: c.auditLog,
     blacklist: c.blacklist,
     controlPanel: c.controlPanel,
+    hierarchy: c.hierarchy,
     putOnOff: c.putOnOff,
     welcome: c.welcome,
     goodbye: c.goodbye,

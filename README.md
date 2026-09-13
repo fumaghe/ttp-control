@@ -357,6 +357,10 @@ Le migration sono versionate in `prisma/migrations/` e vanno committate.
 > e non rimuove — e va applicata **prima** di distribuire il Worker con
 > `ROLE_SYNC_MODE=IMPORT_SAFE`.
 
+> **`20260913010000_hierarchy_panel`** aggiunge il valore `HIERARCHY`
+> all'enum `PanelType`. È additiva e va applicata prima del Worker che pubblica
+> il pannello gerarchia.
+
 ---
 
 ## Sviluppo
@@ -797,6 +801,14 @@ Lo snapshot vive nella tabella `guild_member_snapshots` (modello
 `GuildMemberSnapshot`). Non duplica `DiscordProfile`: quello è l'anagrafica
 applicativa, questo è lo stato Discord grezzo, tenuto al solo scopo di
 calcolare un diff.
+
+Alla fine di ogni esecuzione il cron pubblica o aggiorna un unico pannello nel
+canale `CHANNEL_HIERARCHY_ID`: mostra i nove rank dall'alto verso il basso e,
+sotto ciascuno, le mention dei membri presenti nel roster. Le mention sono
+silenziose, i membri inattivi sono marcati con 💤 e i record `LEFT` o
+`PERMADEATH` non compaiono. L'ID del messaggio vive in `PersistentPanel`, quindi
+un redeploy non crea duplicati; se il messaggio viene cancellato, il cron
+successivo lo ricrea.
 
 **Le regole di dominio sono identiche alla V1:**
 

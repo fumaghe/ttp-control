@@ -73,6 +73,7 @@ export const CHANNEL_IDS = {
   auditLog: '300000000000000005',
   blacklist: '300000000000000006',
   controlPanel: '300000000000000007',
+  hierarchy: '300000000000000011',
   welcome: '300000000000000008',
   goodbye: '300000000000000009',
   putOnOff: '300000000000000010',
