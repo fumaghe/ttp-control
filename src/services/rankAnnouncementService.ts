@@ -60,8 +60,8 @@ export interface RankAnnouncementService {
 /**
  * Direzione di un cambio di rank secondo `RANK_ORDER`.
  *
- * Mai un confronto fra stringhe: `'BIG' > 'BIG_HOMIE'` sarebbe vero in ordine
- * alfabetico e falso nella gerarchia.
+ * Mai un confronto fra stringhe: `'LOC' < 'TINY_LOC'` in ordine alfabetico,
+ * ma nella gerarchia e' il contrario.
  *
  * @returns `null` se i due rank coincidono: non c'e' niente da annunciare.
  */

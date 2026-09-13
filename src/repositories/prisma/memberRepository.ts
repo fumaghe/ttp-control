@@ -16,7 +16,6 @@ function emptyRankTally(): Record<MemberRank, number> {
     [MemberRank.TINY_LOC]: 0,
     [MemberRank.LOC]: 0,
     [MemberRank.ORIGINAL_TINY_LOC]: 0,
-    [MemberRank.BIG]: 0,
     [MemberRank.BIG_HOMIE]: 0,
     [MemberRank.OG]: 0,
   };

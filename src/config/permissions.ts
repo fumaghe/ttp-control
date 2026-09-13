@@ -46,8 +46,6 @@ export type Operation = (typeof OPERATIONS)[number];
  *   `big*`     -> si applica a **BIG_HOMIE** (l'ex `BIG`)
  *   `youngOg*` -> si applica a **ORIGINAL_TINY_LOC** (l'ex `YOUNG_OG`)
  *
- * Il rank `BIG` della nuova gerarchia e' un rank NUOVO, non e' Leadership e
- * non e' toccato da nessuna di queste policy.
  */
 export interface PermissionPolicy {
   /** Big Homie puo' amministrare un altro Big Homie. Default: no. */
@@ -193,9 +191,7 @@ const BIG_HOMIE_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
  * Il rank e' considerato Leadership.
  *
  * Sono ESATTAMENTE i due rank che lo erano con la gerarchia a cinque livelli:
- * `OG` e l'ex `BIG`, che oggi si chiama `BIG_HOMIE`. Il nuovo rank `BIG`, che
- * sta piu' in basso, NON e' Leadership: ha lo stesso nome del vecchio ma un
- * altro ruolo Discord e un altro significato.
+ * `OG` e l'ex `BIG`, che oggi si chiama `BIG_HOMIE`.
  */
 export function isLeadershipRank(rank: MemberRank | undefined): boolean {
   return rank === MemberRank.OG || rank === MemberRank.BIG_HOMIE;
@@ -271,14 +267,6 @@ export function can(
     }
 
     // Tutti gli altri rank non amministrano nulla.
-    //
-    // Qui dentro c'e' anche il NUOVO `BIG`: sta piu' in alto di
-    // ORIGINAL_TINY_LOC nella gerarchia, ma la gerarchia ordina i rank, non
-    // distribuisce privilegi. Il vecchio `BIG` amministrativo e' diventato
-    // `BIG_HOMIE`, e i rank introdotti con la nuova scala non ereditano
-    // permessi solo perche' sono nuovi o perche' ne riusano il nome: chi
-    // vuole dargliene deve aggiungerli qui esplicitamente.
-    case MemberRank.BIG:
     case MemberRank.LOC:
     case MemberRank.TINY_LOC:
     case MemberRank.INFANTIL_LOC:
@@ -377,8 +365,7 @@ export function canActOn(
  *
  * Vale per promote, demote e cambio rank diretto: un Big Homie non deve poter
  * creare altri Big Homie o OG a meno che la policy non lo consenta
- * esplicitamente. Il nuovo rank `BIG` non e' Leadership, quindi resta
- * assegnabile da un Big Homie come ogni altro rank sotto di lui.
+ * esplicitamente.
  */
 export function canAssignRank(
   actor: ActorContext,

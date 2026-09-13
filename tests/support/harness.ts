@@ -44,7 +44,6 @@ export const ROLE_IDS = {
   // Gerarchia, dal piu' alto al piu' basso.
   og: '200000000000000003',
   bigHomie: '200000000000000004',
-  big: '200000000000000019',
   originalTinyLoc: '200000000000000005',
   loc: '200000000000000020',
   tinyLoc: '200000000000000006',

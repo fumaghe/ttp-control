@@ -222,7 +222,6 @@ function build(source: EnvSource) {
       // corrispondenza rank -> ruolo Discord.
       og: read.snowflake('ROLE_OG_ID'),
       bigHomie: read.snowflake('ROLE_BIG_HOMIE_ID'),
-      big: read.snowflake('ROLE_BIG_ID'),
       originalTinyLoc: read.snowflake('ROLE_ORIGINAL_TINY_LOC_ID'),
       loc: read.snowflake('ROLE_LOC_ID'),
       tinyLoc: read.snowflake('ROLE_TINY_LOC_ID'),

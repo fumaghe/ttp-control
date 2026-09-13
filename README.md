@@ -57,13 +57,12 @@ Invarianti applicate dal sistema:
 
 ## La gerarchia
 
-Nove rank, dal più basso al più alto. `/member promote` e `/member demote` si
+Otto rank, dal più basso al più alto. `/member promote` e `/member demote` si
 muovono di **un solo gradino** alla volta.
 
 ```text
 👑 OG
 💎 Big Homie
-🔥 Big
 🥷 Original Tiny Loc
 🧢 Loc
 🏷️ Tiny Loc
@@ -92,10 +91,9 @@ rinominati, non ricreati:
 | `BIG` | `BIG_HOMIE` | lo stesso, rinominato |
 | `OG` | `OG` | invariato |
 
-**Il `Big` di oggi non è il `Big` di ieri.** È un rank nuovo, in mezzo alla
-scala, con un ruolo Discord nuovo (`ROLE_BIG_ID`) — e senza nessuno dei
-permessi amministrativi che il vecchio `Big` aveva: quelli sono andati a
-`Big Homie`. Vedi [Permission matrix](#permission-matrix).
+Il vecchio `Big` oggi si chiama `Big Homie` e conserva i suoi permessi
+amministrativi. Il rank intermedio `Big`, introdotto in seguito, è stato
+rimosso dalla gerarchia.
 
 ---
 
@@ -803,7 +801,7 @@ applicativa, questo è lo stato Discord grezzo, tenuto al solo scopo di
 calcolare un diff.
 
 Alla fine di ogni esecuzione il cron pubblica o aggiorna un unico pannello nel
-canale `CHANNEL_HIERARCHY_ID`: mostra i nove rank dall'alto verso il basso e,
+canale `CHANNEL_HIERARCHY_ID`: mostra gli otto rank dall'alto verso il basso e,
 sotto ciascuno, le mention di chi possiede davvero quel ruolo su Discord. Usa
 gli snapshot con `inGuild=true`, quindi chi ha lasciato il server non compare
 anche se conserva un vecchio record `Member` nel database. Ruoli e membri sono

@@ -20,7 +20,7 @@ import {
 const USER = '900000000000000001';
 const OG = '900000000000000010';
 
-/** Tutti e nove i ruoli della gerarchia: un membro TTP ne ha esattamente uno. */
+/** Tutti gli otto ruoli della gerarchia: un membro TTP ne ha esattamente uno. */
 const ALL_RANK_ROLE_IDS = [
   ROLE_IDS.resident,
   ROLE_IDS.gangBanger,
@@ -28,7 +28,6 @@ const ALL_RANK_ROLE_IDS = [
   ROLE_IDS.tinyLoc,
   ROLE_IDS.loc,
   ROLE_IDS.originalTinyLoc,
-  ROLE_IDS.big,
   ROLE_IDS.bigHomie,
   ROLE_IDS.og,
 ];
@@ -140,7 +139,7 @@ describe('promote', () => {
   });
 
   it('avanza di UN solo gradino lungo tutta la gerarchia', async () => {
-    // Ogni coppia è un gradino della scala a nove rank: un promote non deve
+    // Ogni coppia è un gradino della scala a otto rank: un promote non deve
     // mai saltarne uno, nemmeno fra i rank aggiunti dopo la V1.
     const steps = [
       [MemberRank.RESIDENT, MemberRank.GANG_BANGER],
@@ -148,8 +147,7 @@ describe('promote', () => {
       [MemberRank.INFANTIL_LOC, MemberRank.TINY_LOC],
       [MemberRank.TINY_LOC, MemberRank.LOC],
       [MemberRank.LOC, MemberRank.ORIGINAL_TINY_LOC],
-      [MemberRank.ORIGINAL_TINY_LOC, MemberRank.BIG],
-      [MemberRank.BIG, MemberRank.BIG_HOMIE],
+      [MemberRank.ORIGINAL_TINY_LOC, MemberRank.BIG_HOMIE],
       [MemberRank.BIG_HOMIE, MemberRank.OG],
     ] as const;
 
@@ -198,8 +196,7 @@ describe('demote', () => {
   it('retrocede di UN solo gradino lungo tutta la gerarchia', async () => {
     const steps = [
       [MemberRank.OG, MemberRank.BIG_HOMIE],
-      [MemberRank.BIG_HOMIE, MemberRank.BIG],
-      [MemberRank.BIG, MemberRank.ORIGINAL_TINY_LOC],
+      [MemberRank.BIG_HOMIE, MemberRank.ORIGINAL_TINY_LOC],
       [MemberRank.ORIGINAL_TINY_LOC, MemberRank.LOC],
       [MemberRank.LOC, MemberRank.TINY_LOC],
       [MemberRank.TINY_LOC, MemberRank.INFANTIL_LOC],

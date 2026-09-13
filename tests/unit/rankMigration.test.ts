@@ -120,7 +120,7 @@ describe('nuovi valori dell’enum', () => {
     expect(MIGRATION).toContain("ADD VALUE 'BIG' AFTER 'ORIGINAL_TINY_LOC'");
   });
 
-  it('l’ordinamento risultante dell’enum coincide con RANK_ORDER', () => {
+  it('ricostruisce l’ordinamento storico a nove rank', () => {
     // Si ricostruisce l'enum applicando le istruzioni della migration a mano,
     // partendo dai cinque valori della V1.
     const values = ['RESIDENT', 'GANGSTER', 'YOUNG_OG', 'BIG', 'OG'];
@@ -137,7 +137,17 @@ describe('nuovi valori dell’enum', () => {
       }
     }
 
-    expect(values).toEqual([...RANK_ORDER]);
+    expect(values).toEqual([
+      'RESIDENT',
+      'GANG_BANGER',
+      'INFANTIL_LOC',
+      'TINY_LOC',
+      'LOC',
+      'ORIGINAL_TINY_LOC',
+      'BIG',
+      'BIG_HOMIE',
+      'OG',
+    ]);
   });
 });
 

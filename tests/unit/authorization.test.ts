@@ -14,7 +14,6 @@ import {
   can,
   DEFAULT_POLICY,
   hasAmbiguousRankState,
-  isLeadershipRank,
   type PermissionPolicy,
   protectedRank,
   type TargetContext,
@@ -105,10 +104,7 @@ describe('OG', () => {
   });
 });
 
-/**
- * Ex `BIG` della gerarchia a cinque rank: eredita le sue policy, invariate.
- * Il rank che oggi si chiama `BIG` è un altro — vedi il describe in fondo.
- */
+/** Ex `BIG` della gerarchia a cinque rank: eredita le sue policy, invariate. */
 describe('Big Homie', () => {
   const bigHomie = actor({ rank: MemberRank.BIG_HOMIE, highestRolePosition: 70 });
 
@@ -141,10 +137,10 @@ describe('Big Homie', () => {
     expect(decision.allowed).toBe(true);
   });
 
-  it('può amministrare un membro del nuovo rank BIG, che gli sta sotto', () => {
+  it('può amministrare un Original Tiny Loc, che gli sta sotto', () => {
     const decision = canActOn(
       bigHomie,
-      target({ rank: MemberRank.BIG, highestRolePosition: 10 }),
+      target({ rank: MemberRank.ORIGINAL_TINY_LOC, highestRolePosition: 10 }),
       'member.demote',
     );
     expect(decision.allowed).toBe(true);
@@ -164,7 +160,7 @@ describe('Big Homie', () => {
     expect(canAssignRank(bigHomie, MemberRank.OG).allowed).toBe(false);
   });
 
-  it('può assegnare ogni rank NON Leadership, incluso il nuovo BIG', () => {
+  it('può assegnare ogni rank NON Leadership', () => {
     for (const rank of [
       MemberRank.RESIDENT,
       MemberRank.GANG_BANGER,
@@ -172,7 +168,6 @@ describe('Big Homie', () => {
       MemberRank.TINY_LOC,
       MemberRank.LOC,
       MemberRank.ORIGINAL_TINY_LOC,
-      MemberRank.BIG,
     ]) {
       expect(canAssignRank(bigHomie, rank).allowed).toBe(true);
     }
@@ -220,60 +215,6 @@ describe('Original Tiny Loc', () => {
   });
 });
 
-/**
- * Il punto più delicato della migrazione a nove rank.
- *
- * `BIG` esisteva anche prima ed era il rank amministrativo della gang. Oggi
- * quel rank si chiama `BIG_HOMIE`, e `BIG` è un rank NUOVO, più in basso, con
- * un altro ruolo Discord. Se ereditasse le policy per omonimia, la gang si
- * ritroverebbe un'intera fascia di membri promossi ad amministratori senza
- * che nessuno l'abbia deciso.
- */
-describe('il nuovo BIG non eredita i privilegi del vecchio BIG', () => {
-  const newBig = actor({ rank: MemberRank.BIG, highestRolePosition: 60 });
-
-  it('NON è un rank Leadership', () => {
-    expect(isLeadershipRank(MemberRank.BIG)).toBe(false);
-    expect(isLeadershipRank(MemberRank.BIG_HOMIE)).toBe(true);
-    expect(isLeadershipRank(MemberRank.OG)).toBe(true);
-  });
-
-  it('NON può eseguire nessuna delle operazioni che spettavano al vecchio Big', () => {
-    for (const operation of [
-      'member.add',
-      'member.promote',
-      'member.demote',
-      'member.rank',
-      'member.remove',
-      'member.status',
-      'member.specialRoles',
-      'member.notes.view',
-      'application.review',
-      'community.manage',
-      'blacklist.manage',
-      'panel.use',
-    ] as const) {
-      expect(can(newBig, operation).allowed).toBe(false);
-    }
-  });
-
-  it('non guadagna nulla nemmeno con la policy più permissiva', () => {
-    expect(can(newBig, 'blacklist.manage', permissive).allowed).toBe(false);
-    expect(can(newBig, 'panel.use', permissive).allowed).toBe(false);
-    expect(can(newBig, 'application.review', permissive).allowed).toBe(false);
-  });
-
-  it('NON può assegnare rank', () => {
-    expect(canAssignRank(newBig, MemberRank.RESIDENT).allowed).toBe(false);
-    expect(canAssignRank(newBig, MemberRank.BIG).allowed).toBe(false);
-  });
-
-  it('resta comunque in sola lettura, come ogni altro membro', () => {
-    expect(can(newBig, 'roster.view').allowed).toBe(true);
-    expect(can(newBig, 'member.info').allowed).toBe(true);
-  });
-});
-
 describe('rank senza privilegi amministrativi', () => {
   /** Tutta la gerarchia tranne i due rank Leadership e Original Tiny Loc. */
   const plainRanks = [
@@ -282,7 +223,6 @@ describe('rank senza privilegi amministrativi', () => {
     MemberRank.INFANTIL_LOC,
     MemberRank.TINY_LOC,
     MemberRank.LOC,
-    MemberRank.BIG,
   ] as const;
 
   it('hanno accesso in sola lettura', () => {
@@ -297,12 +237,7 @@ describe('rank senza privilegi amministrativi', () => {
   });
 
   it('i rank nuovi non hanno ricevuto privilegi solo perché sono nuovi', () => {
-    for (const rank of [
-      MemberRank.GANG_BANGER,
-      MemberRank.INFANTIL_LOC,
-      MemberRank.LOC,
-      MemberRank.BIG,
-    ]) {
+    for (const rank of [MemberRank.GANG_BANGER, MemberRank.INFANTIL_LOC, MemberRank.LOC]) {
       const member = actor({ rank, highestRolePosition: 20 });
       expect(can(member, 'member.add').allowed).toBe(false);
       expect(can(member, 'setup.run').allowed).toBe(false);
@@ -345,9 +280,9 @@ describe('regole trasversali', () => {
   });
 
   it('nessuno può amministrare un rank superiore al proprio', () => {
-    const gangsterAsBig = actor({ rank: MemberRank.BIG, highestRolePosition: 70 });
+    const lowerRank = actor({ rank: MemberRank.LOC, highestRolePosition: 70 });
     const decision = canActOn(
-      gangsterAsBig,
+      lowerRank,
       target({ rank: MemberRank.OG, highestRolePosition: 10 }),
       'member.status',
     );
@@ -481,7 +416,7 @@ describe('TTP con esattamente un rank', () => {
   it('`authorizedRank` restituisce quel rank e nessun altro', () => {
     expect(authorizedRank(actor({ isTtp: true, rank: MemberRank.OG }))).toBe(MemberRank.OG);
     expect(authorizedRank(actor({ isTtp: false, rank: MemberRank.OG }))).toBeUndefined();
-    expect(authorizedRank(actor({ ranks: [MemberRank.OG, MemberRank.BIG] }))).toBeUndefined();
+    expect(authorizedRank(actor({ ranks: [MemberRank.OG, MemberRank.LOC] }))).toBeUndefined();
     expect(authorizedRank(actor({ ranks: [] }))).toBeUndefined();
   });
 });

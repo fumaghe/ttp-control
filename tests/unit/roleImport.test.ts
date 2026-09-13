@@ -326,10 +326,10 @@ describe('cambio di rank manuale', () => {
   });
 
   it('la direzione segue RANK_ORDER, non l’ordine alfabetico', async () => {
-    // `BIG` < `BIG_HOMIE` nella gerarchia ma 'BIG_HOMIE' > 'BIG' in ordine
+    // `LOC` > `TINY_LOC` nella gerarchia ma 'LOC' < 'TINY_LOC' in ordine
     // alfabetico: un confronto fra stringhe annuncerebbe la direzione sbagliata.
     roles(MEMBER).delete(ROLE_IDS.tinyLoc);
-    roles(MEMBER).add(ROLE_IDS.big);
+    roles(MEMBER).add(ROLE_IDS.loc);
     await cron.run();
 
     expect(announcementTitles()).toEqual(['🔥 PUT ON']);

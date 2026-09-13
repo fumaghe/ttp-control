@@ -37,7 +37,7 @@ datasource db {
 
 /// Gerarchia TTP, dal piu' basso al piu' alto:
 /// RESIDENT -> GANG_BANGER -> INFANTIL_LOC -> TINY_LOC -> LOC ->
-/// ORIGINAL_TINY_LOC -> BIG -> BIG_HOMIE -> OG
+/// ORIGINAL_TINY_LOC -> BIG_HOMIE -> OG
 ///
 /// L'ordine di dichiarazione e' anche l'ordine dei valori dell'enum a
 /// database (vedi la migration 20260818000000_nine_rank_hierarchy), quindi
@@ -48,8 +48,7 @@ datasource db {
 /// BIG, OG. I valori legacy non sono stati cancellati ma RINOMINATI, perche'
 /// i ruoli Discord corrispondenti sono stati riutilizzati:
 ///   GANGSTER -> TINY_LOC, YOUNG_OG -> ORIGINAL_TINY_LOC, BIG -> BIG_HOMIE.
-/// Il BIG di questa enum e' quindi un rank NUOVO, con un ruolo Discord nuovo:
-/// non ha niente a che vedere con il BIG della V1.
+/// Il vecchio BIG della V1 oggi si chiama BIG_HOMIE.
 enum MemberRank {
   RESIDENT
   GANG_BANGER
@@ -57,7 +56,6 @@ enum MemberRank {
   TINY_LOC
   LOC
   ORIGINAL_TINY_LOC
-  BIG
   BIG_HOMIE
   OG
 }
@@ -394,13 +392,12 @@ model GuildConfig {
   /// --- Policy di authorization (vedi src/config/permissions.ts) ---
   ///
   /// I NOMI DI QUESTE COLONNE SONO LEGACY, il significato no.
-  /// Con la gerarchia a nove rank il ruolo che si chiamava `BIG` si chiama
+  /// Con la gerarchia attuale il ruolo che si chiamava `BIG` si chiama
   /// `BIG_HOMIE`, e quello che si chiamava `YOUNG_OG` si chiama
   /// `ORIGINAL_TINY_LOC`. Le colonne conservano il nome originale per non
   /// richiedere una migration puramente cosmetica su dati gia' in produzione:
-  ///   big*   -> si applica a BIG_HOMIE        (NON al nuovo rank BIG)
+  ///   big*   -> si applica a BIG_HOMIE
   ///   youngOg* -> si applica a ORIGINAL_TINY_LOC
-  /// Il nuovo rank BIG non e' Leadership e nessuna di queste policy lo tocca.
   bigCanManageBig              Boolean @default(false)
   bigCanPromoteToLeadership    Boolean @default(false)
   bigCanBlacklist              Boolean @default(true)

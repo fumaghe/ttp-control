@@ -309,7 +309,7 @@ describe('modifiche manuali dei ruoli (sostituisce guildMemberUpdate)', () => {
     });
     await service.run();
 
-    harness.guild.members.get(MEMBER)?.roles.add(ROLE_IDS.big);
+    harness.guild.members.get(MEMBER)?.roles.add(ROLE_IDS.bigHomie);
     await service.run();
 
     const warning = harness.store.audit.find(
